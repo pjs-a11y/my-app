@@ -82,30 +82,18 @@ def analyze_prediction(records):
 
     # 3. 📦 투박스(2-2) 구간 감지
     if n >= 4:
+        # 패턴: A A B ? -> B 추천
         if results[-3] == results[-4] and results[-1] == results[-2] and results[-1] != results[-3]:
             opp_item = OPPOSITE_MAP[results[-1]]
             rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
             return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 완료 예상 ➔ 꺾기")
+        # 패턴: A A B ? -> B 추천 (투박스 진행 중)
         elif results[-2] == results[-3] and results[-1] != results[-2]:
             same_item = results[-1]
             rec_s, rec_l = ITEM_MAP[same_item][0], ITEM_MAP[same_item][1]
             return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 진행 구간 ➔ 줄타기")
 
-    # 4. 🪞 데칼(대칭) 패턴 감지
-    if n >= 5:
-        # 1-2-2-1 형태의 대칭 완성 단계 (A B B A A -> B 예측)
-        if results[-1] == results[-2] and results[-3] == results[-4] and results[-1] != results[-3]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
-            return (rec_s, 75.00, rec_l, 75.00, "🪞 데칼(좌우대칭) 구간 ➔ 대칭 완성 꺾기")
-            
-        # 1-2-1 형태 대칭 (A B B -> A 예측)
-        if results[-1] == results[-2] and results[-1] != results[-3]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
-            return (rec_s, 72.00, rec_l, 72.00, "🪞 데칼(1-2-1) 구간 ➔ 대칭 꺾기")
-
-    # 5. 📊 일반 과거 패턴 다수결 분석
+    # 4. 📊 일반 과거 패턴 다수결 분석
     p3 = results[-3:]
     m3 = [results[j+3] for j in range(n-3) if results[j:j+3] == p3]
     p2 = results[-2:]
