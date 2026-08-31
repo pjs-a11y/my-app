@@ -54,7 +54,6 @@ def save_data(records):
         pass
 
 def analyze_prediction(records):
-    # 최근 3000개 이하 범위 내에서 분석
     target_records = records[-MAX_DATA_SIZE:]
     results = [r['result'] for r in target_records]
     n = len(results)
@@ -90,7 +89,6 @@ def analyze_prediction(records):
     return (rec_s, s_prob, rec_l, l_prob, pattern_status)
 
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
-    # 최근 N개 필터링 옵션
     if limit_recent:
         eval_records = records[-limit_recent:]
     else:
@@ -115,9 +113,16 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
             rec_s, _, rec_l, _, _ = pred
             
             tot_count += 1
-            if f"{rec_s}{rec_l}" == act: c_win += 1
-            if rec_s == act_s: s_win += 1
-            if rec_l == act_l: l_win += 1
+            s_ok = (rec_s == act_s)
+            l_ok = (rec_l == act_l)
+            
+            # 둘 중 하나만 맞춰도 조합 성공 판정
+            if s_ok or l_ok: 
+                c_win += 1
+            if s_ok: 
+                s_win += 1
+            if l_ok: 
+                l_win += 1
 
     if tot_count == 0:
         return None
@@ -239,7 +244,7 @@ else:
             act_s, act_l = ITEM_MAP[prev_actual][0], ITEM_MAP[prev_actual][1]
             s_res = "성공" if p_s == act_s else "실패"
             l_res = "성공" if p_l == act_l else "실패"
-            c_res = "성공" if f"{p_s}{p_l}" == prev_actual else "실패"
+            c_res = "성공" if (p_s == act_s or p_l == act_l) else "실패"
             
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
             st.markdown(f"결과 : **{prev_actual}** / 예측 : **{p_s}{p_l}**")
@@ -344,7 +349,7 @@ else:
                 
                 s_chk = "성공" if pr_s == act_s else "실패"
                 l_chk = "성공" if pr_l == act_l else "실패"
-                c_chk = "성공" if pr_str == act_item else "실패"
+                c_chk = "성공" if (pr_s == act_s or pr_l == act_l) else "실패"
                 
                 rows.append({
                     "회차": f"{rd_num}회",
