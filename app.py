@@ -1,4 +1,5 @@
 import os
+import re
 import copy
 import pandas as pd
 import streamlit as st
@@ -116,7 +117,6 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
             s_ok = (rec_s == act_s)
             l_ok = (rec_l == act_l)
             
-            # 둘 중 하나만 맞춰도 조합 성공 판정
             if s_ok or l_ok: 
                 c_win += 1
             if s_ok: 
@@ -139,6 +139,8 @@ if "records" not in st.session_state:
     st.session_state.records = load_data()
 if "history_stack" not in st.session_state:
     st.session_state.history_stack = []
+if "show_bulk" not in st.session_state:
+    st.session_state.show_bulk = False
 
 def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
@@ -147,8 +149,46 @@ def push_backup():
 
 records = st.session_state.records
 
-# 1. 데이터가 없을 때 초기 설정 화면
-if not records:
+# 1. 대량 입력 모드 화면
+if st.session_state.show_bulk:
+    st.markdown("**📋 과거 데이터 한 번에 복사/붙여넣기**")
+    st.markdown("글자 사이 공백, 줄바꿈, 회차 구분 상관없이 `우사`, `우삼`, `좌사`, `좌삼` 문자를 자동으로 찾아 연속 등록합니다.")
+    
+    b_date = st.date_input("입력할 날짜 선택", datetime.now())
+    b_start_rd = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
+    
+    raw_text = st.text_area("텍스트 붙여넣기", height=180, placeholder="예시:\n우사 우삼 좌사 좌삼 우사\n또는\n1회 우사\n2회 우삼\n3회 좌사")
+    
+    col_b1, col_b2 = st.columns(2)
+    if col_b1.button("📥 데이터 일괄 추가", use_container_width=True):
+        # 우사, 우삼, 좌사, 좌삼 패턴 추출
+        found_items = re.findall(r'우사|우삼|좌사|좌삼', raw_text)
+        if found_items:
+            push_backup()
+            curr_rd = int(b_start_rd)
+            dt_str = b_date.strftime("%Y-%m-%d")
+            for item in found_items:
+                st.session_state.records.append({
+                    'date': dt_str,
+                    'round': curr_rd,
+                    'result': item
+                })
+                curr_rd += 1
+                if curr_rd > 288:
+                    curr_rd = 1
+            save_data(st.session_state.records)
+            st.toast(f"총 {len(found_items)}개의 데이터가 일괄 등록되었습니다!")
+            st.session_state.show_bulk = False
+            st.rerun()
+        else:
+            st.error("입력한 텍스트에서 '우사', '우삼', '좌사', '좌삼'을 찾지 못했습니다.")
+
+    if col_b2.button("❌ 취소", use_container_width=True):
+        st.session_state.show_bulk = False
+        st.rerun()
+
+# 2. 데이터가 완전히 비어있을 때
+elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
     init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
@@ -171,14 +211,19 @@ if not records:
         save_data(st.session_state.records)
         st.rerun()
 
+    st.markdown("---")
+    if st.button("📋 텍스트로 한 번에 대량 입력하기", use_container_width=True):
+        st.session_state.show_bulk = True
+        st.rerun()
+
     if st.session_state.history_stack:
-        st.markdown("---")
         if st.button("↩️ 이전 상태로 되돌리기", use_container_width=True):
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
             st.toast("직전 상태로 복원되었습니다.")
             st.rerun()
 
+# 3. 메인 분석 화면
 else:
     last_rec = records[-1]
     curr_date = last_rec['date']
@@ -186,8 +231,12 @@ else:
     if next_round > 288:
         next_round = 1
 
-    # 상단 요약
+    # 상단 요약 및 대량 입력 버튼
     st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
+    if st.button("📋 텍스트 대량 추가", use_container_width=True):
+        st.session_state.show_bulk = True
+        st.rerun()
+
     st.markdown("---")
 
     # 1. 전체 누적 통계
