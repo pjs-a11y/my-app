@@ -68,7 +68,7 @@ def analyze_prediction(records):
     if n < 4:
         return None
 
-    # 가중치 점수판 초기화 (우사, 우삼, 좌사, 좌삼)
+    # 순수 패턴 가중치 점수판 (과거 다수결 제거됨)
     scores = {'우사': 0.0, '우삼': 0.0, '좌사': 0.0, '좌삼': 0.0}
     active_patterns = []
 
@@ -129,38 +129,34 @@ def analyze_prediction(records):
             scores[opp_item] += 18.0
             active_patterns.append("데칼(1-2-1)")
 
-    # 5. 📊 과거 패턴 다수결 매칭 (동적 가중치 +10 ~ +30)
-    p3 = results[-3:]
-    m3 = [results[j+3] for j in range(n-3) if results[j:j+3] == p3]
-    p2 = results[-2:]
-    m2 = [results[j+2] for j in range(n-2) if results[j:j+2] == p2]
-
-    target = m3 if len(m3) >= 3 else m2
-    if target:
-        tot = len(target)
-        item_counts = Counter(target)
-        for item, count in item_counts.items():
-            ratio = count / tot
-            scores[item] += (ratio * 30.0)  # 다수결 비율에 따른 가중치 산정
-        active_patterns.append("과거 패턴 매칭")
-
-    # 최고 점수 항목 선출
     best_item = max(scores, key=scores.get)
     best_score = scores[best_item]
 
+    # 특수 패턴 감지가 없을 때 (관망)
     if best_score == 0.0:
-        return None
+        return ("-", 50.0, "-", 50.0, "⚠️ 특수 패턴 없음 (패스/관망 권장)")
 
     rec_s, rec_l = ITEM_MAP[best_item][0], ITEM_MAP[best_item][1]
 
-    # 확률 및 통계 수치 산정 (점수 기반 비율 계산)
-    total_score_sum = sum(scores.values())
-    prob = (best_score / total_score_sum * 100.0) if total_score_sum > 0 else 50.0
+    # 출발 및 줄수 가중치 점수 분리 집계
+    score_s = {'우': 0.0, '좌': 0.0}
+    score_l = {'사': 0.0, '삼': 0.0}
 
-    pat_summary = " + ".join(active_patterns[:2]) if active_patterns else "일반 분석"
-    status_text = f"⚖️ 가중치 종합 [{pat_summary}] (점수: {best_score:.1f}점)"
+    for item, sc in scores.items():
+        s_val, l_val, _ = ITEM_MAP[item]
+        score_s[s_val] += sc
+        score_l[l_val] += sc
 
-    return (rec_s, prob, rec_l, prob, status_text)
+    total_s = score_s['우'] + score_s['좌']
+    total_l = score_l['사'] + score_l['삼']
+
+    s_prob = (score_s[rec_s] / total_s * 100.0) if total_s > 0 else 50.0
+    l_prob = (score_l[rec_l] / total_l * 100.0) if total_l > 0 else 50.0
+
+    pat_summary = " + ".join(active_patterns)
+    status_text = f"🎯 순수 패턴 감지 [{pat_summary}] (점수: {best_score:.1f}점)"
+
+    return (rec_s, s_prob, rec_l, l_prob, status_text)
 
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
@@ -181,7 +177,7 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
 
         past_sub = eval_records[:i]
         pred = analyze_prediction(past_sub)
-        if pred:
+        if pred and pred[0] != "-":
             act = eval_records[i]['result']
             act_s, act_l = ITEM_MAP[act][0], ITEM_MAP[act][1]
             rec_s, _, rec_l, _, _ = pred
@@ -360,7 +356,7 @@ else:
         prev_pred = analyze_prediction(prev_sub)
         prev_actual = last_rec['result']
         
-        if prev_pred:
+        if prev_pred and prev_pred[0] != "-":
             p_s, _, p_l, _, _ = prev_pred
             act_s, act_l = ITEM_MAP[prev_actual][0], ITEM_MAP[prev_actual][1]
             s_res = "성공" if p_s == act_s else "실패"
@@ -370,6 +366,9 @@ else:
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
             st.markdown(f"결과 : **{prev_actual}** / 예측 : **{p_s}{p_l}**")
             st.markdown(f"출발 : **{s_res}** / 줄수 : **{l_res}** / 조합 : **{c_res}**")
+        else:
+            st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
+            st.markdown(f"결과 : **{prev_actual}** / 예측 : **관망(패스)**")
     st.markdown("---")
 
     # 5. 구간 정보 및 이번회차 예측
@@ -379,7 +378,10 @@ else:
         st.markdown(f"**구간 : {pat}**")
         st.markdown("---")
         st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
-        st.markdown(f"출발 : **{rec_s}** / 줄수 : **{rec_l}** ➔ **[{rec_s}{rec_l}]**")
+        if rec_s != "-":
+            st.markdown(f"출발 : **{rec_s}** `{s_p:.2f}%` / 줄수 : **{rec_l}** `{l_p:.2f}%` ➔ **[{rec_s}{rec_l}]**")
+        else:
+            st.markdown("⚠️ 확실한 특수 패턴이 없습니다. **패스(관망)를 추천합니다.**")
     else:
         st.markdown("**구간 : 분석 데이터 부족**")
         st.markdown("---")
@@ -464,20 +466,28 @@ else:
             rd_num = records[i]['round']
             
             if pr:
-                pr_s, _, pr_l, _, _ = pr
-                pr_str = f"{pr_s}{pr_l}"
-                act_s, act_l = ITEM_MAP[act_item][0], ITEM_MAP[act_item][1]
-                
-                s_chk = "성공" if pr_s == act_s else "실패"
-                l_chk = "성공" if pr_l == act_l else "실패"
-                c_chk = "성공" if (pr_s == act_s or pr_l == act_l) else "실패"
-                
-                rows.append({
-                    "회차": f"{rd_num}회",
-                    "예측 / 결과": f"{pr_str} / {act_item}",
-                    "출발 줄수": f"{s_chk} {l_chk}",
-                    "조합": c_chk
-                })
+                if pr[0] != "-":
+                    pr_s, _, pr_l, _, _ = pr
+                    pr_str = f"{pr_s}{pr_l}"
+                    act_s, act_l = ITEM_MAP[act_item][0], ITEM_MAP[act_item][1]
+                    
+                    s_chk = "성공" if pr_s == act_s else "실패"
+                    l_chk = "성공" if pr_l == act_l else "실패"
+                    c_chk = "성공" if (pr_s == act_s or pr_l == act_l) else "실패"
+                    
+                    rows.append({
+                        "회차": f"{rd_num}회",
+                        "예측 / 결과": f"{pr_str} / {act_item}",
+                        "출발 줄수": f"{s_chk} {l_chk}",
+                        "조합": c_chk
+                    })
+                else:
+                    rows.append({
+                        "회차": f"{rd_num}회",
+                        "예측 / 결과": f"관망 / {act_item}",
+                        "출발 줄수": "패스 패스",
+                        "조합": "패스"
+                    })
         
         if rows:
             df = pd.DataFrame(rows)
