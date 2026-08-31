@@ -99,15 +99,16 @@ def analyze_pure_pattern(stream, val1, val2):
 
     return "-", 50.0, "⚠️ 조건미부합(패스)"
 
-# 메인 예측 분석 함수 (구멍 독립 표출)
+# 메인 예측 분석 함수 (PASS 회차 완벽 필터링)
 def analyze_prediction(records):
-    target_records = records[-MAX_DATA_SIZE:]
-    if len(target_records) < 4:
+    # PASS를 제외한 실제 결과 데이터만 추출
+    valid_records = [r for r in records if r['result'] in ITEM_MAP][-MAX_DATA_SIZE:]
+    if len(valid_records) < 4:
         return None
 
-    s_stream = [ITEM_MAP[r['result']][0] for r in target_records]
-    l_stream = [ITEM_MAP[r['result']][1] for r in target_records]
-    o_stream = [ITEM_MAP[r['result']][2] for r in target_records]
+    s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
+    l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
+    o_stream = [ITEM_MAP[r['result']][2] for r in valid_records]
 
     rec_s, prob_s, pat_s = analyze_pure_pattern(s_stream, '우', '좌')
     rec_l, prob_l, pat_l = analyze_pure_pattern(l_stream, '사', '삼')
@@ -142,6 +143,7 @@ def analyze_prediction(records):
         'status': status_text
     }
 
+# 통계 연산 (PASS 회차 제외)
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
         eval_records = records[-limit_recent:]
@@ -156,13 +158,17 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     c_win, s_win, l_win, o_win = 0, 0, 0, 0
 
     for i in range(4, n):
+        act = eval_records[i]['result']
+        # PASS 회차는 통계 분석 대상에서 제외
+        if act not in ITEM_MAP:
+            continue
+
         if target_date and eval_records[i]['date'] != target_date:
             continue
 
         past_sub = eval_records[:i]
         pred = analyze_prediction(past_sub)
         if pred and (pred['top1'] is not None):
-            act = eval_records[i]['result']
             act_s, act_l, act_o = ITEM_MAP[act]
             
             tot_count += 1
@@ -216,8 +222,11 @@ records = st.session_state.records
 # 1. 대량 입력 모드
 if st.session_state.show_bulk:
     st.markdown("**📋 과거 데이터 한 번에 복사/붙여넣기**")
+    st.markdown("글자 사이 공백, 줄바꿈, 회차 구분 상관없이 `우사`, `우삼`, `좌사`, `좌삼` 문자를 자동으로 찾아 연속 등록합니다.")
+    
     b_date = st.date_input("입력할 날짜 선택", datetime.now())
     b_start_rd = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
+    
     raw_text = st.text_area("텍스트 붙여넣기", height=180, placeholder="예시:\n우사 우삼 좌사 좌삼 우사")
     
     col_b1, col_b2 = st.columns(2)
@@ -273,17 +282,78 @@ else:
 
     st.markdown("---")
 
-    # 통계 표출
-    recent_stat = calculate_detailed_stats(records, limit_recent=MAX_DATA_SIZE)
-    recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 독립 구멍 적중 통계**")
-    if recent_stat:
-        st.markdown(f"추천 적중 : {recent_stat['total']}회 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 ({recent_stat['c_rate']:.1f}%)")
-        st.markdown(f"출발: {recent_stat['s_win']}승 | 줄수: {recent_stat['l_win']}승 | 홀짝: {recent_stat['o_win']}승")
+    # 1. 전체 누적 통계
+    all_stat = calculate_detailed_stats(records)
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    if all_stat:
+        st.markdown(f"추천 적중 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {all_stat['s_win']}승 {all_stat['s_lose']}패 ({all_stat['s_rate']:.1f}%) | 줄수 : {all_stat['l_win']}승 {all_stat['l_lose']}패 ({all_stat['l_rate']:.1f}%) | 홀짝 : {all_stat['o_win']}승 {all_stat['o_lose']}패 ({all_stat['o_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    # 이번회차 독립 예측 표출
+    # 2. 최근 3000개 누적 통계
+    recent_stat = calculate_detailed_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    if recent_stat:
+        st.markdown(f"추천 적중 : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {recent_stat['s_win']}승 {recent_stat['s_lose']}패 ({recent_stat['s_rate']:.1f}%) | 줄수 : {recent_stat['l_win']}승 {recent_stat['l_lose']}패 ({recent_stat['l_rate']:.1f}%) | 홀짝 : {recent_stat['o_win']}승 {recent_stat['o_lose']}패 ({recent_stat['o_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 3. 오늘 통계
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
+
+    today_stat = calculate_detailed_stats(records, target_date=curr_date)
+    st.markdown(f"**오늘 : {curr_date} {w_str}**")
+    if today_stat:
+        st.markdown(f"추천 적중 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {today_stat['s_win']}승 {today_stat['s_lose']}패 ({today_stat['s_rate']:.1f}%) | 줄수 : {today_stat['l_win']}승 {today_stat['l_lose']}패 ({today_stat['l_rate']:.1f}%) | 홀짝 : {today_stat['o_win']}승 {today_stat['o_lose']}패 ({today_stat['o_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 4. 이전 회차 분석
+    if len(records) >= 5:
+        prev_sub = records[:-1]
+        prev_pred = analyze_prediction(prev_sub)
+        prev_actual = last_rec['result']
+        
+        if prev_actual == "PASS":
+            st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
+            st.markdown(f"결과 : **패스(PASS)** ➔ **통계 제외**")
+        elif prev_pred and prev_pred['top1']:
+            act_s, act_l, act_o = ITEM_MAP[prev_actual]
+            t1_val = prev_pred['top1'][1]
+            t1_name = prev_pred['top1'][0]
+            
+            t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+            if prev_pred['top2']:
+                t2_val = prev_pred['top2'][1]
+                t2_name = prev_pred['top2'][0]
+                t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            else:
+                t2_ok = False
+                
+            c_res = "성공" if (t1_ok or t2_ok) else "실패"
+            
+            st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
+            st.markdown(f"결과 : **{prev_actual} ({act_o})** / 예측 : **{prev_pred['top_combination']}** ➔ **{c_res}**")
+        else:
+            st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
+            st.markdown(f"결과 : **{prev_actual}** / 예측 : **관망(패스)**")
+    st.markdown("---")
+
+    # 5. 이번회차 독립 예측 표출
     curr_pred = analyze_prediction(records)
     if curr_pred:
         st.markdown(f"**구간 : {curr_pred['status']}**")
@@ -294,11 +364,14 @@ else:
         st.markdown(f"홀짝 : **{curr_pred['rec_o']}** `{curr_pred['prob_o']:.1f}%` ({curr_pred['pat_o']})")
         st.markdown(f"🎯 **최고 확률 추천 구멍 : {curr_pred['top_combination']}**")
     else:
-        st.markdown("데이터 축적 중...")
+        st.markdown("**구간 : 분석 데이터 부족**")
+        st.markdown("---")
+        st.markdown(f"**이번회차예측 ( {next_round}회차 )**\n데이터 축적 중...")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
 
+    # 결과 입력 버튼 (4개)
     c1, c2, c3, c4 = st.columns(4)
     b_um = c1.button("우삼", use_container_width=True)
     b_us = c2.button("우사", use_container_width=True)
@@ -319,12 +392,14 @@ else:
 
     st.markdown("---")
 
+    # 제어 버튼 (4개)
     m1, m2, m3, m4 = st.columns(4)
     if m1.button("패스", use_container_width=True):
         push_backup()
-        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "우사"})
+        # 패스 시 PASS 저장
+        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         save_data(st.session_state.records)
-        st.toast(f"{next_round}회차 패스")
+        st.toast(f"{next_round}회차 패스 처리 완료")
         st.rerun()
 
     if m2.button("직전취소", use_container_width=True):
@@ -332,16 +407,73 @@ else:
             push_backup()
             st.session_state.records.pop()
             save_data(st.session_state.records)
+            st.toast("직전회차 취소")
             st.rerun()
 
     if m3.button("초기화", use_container_width=True):
         push_backup()
         st.session_state.records = []
         if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
+        st.toast("초기화 완료")
         st.rerun()
 
     if m4.button("되돌리기", use_container_width=True):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
+            st.toast("되돌리기 완료!")
             st.rerun()
+
+    st.markdown("---")
+
+    # 6. 세부 결과 표 (당일 최신순 정렬)
+    st.markdown("**세부 결과**")
+    if len(records) >= 5:
+        rows = []
+        today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
+        
+        for i in reversed(today_indices):
+            if i < 4:
+                continue
+            p_sub = records[:i]
+            pr = analyze_prediction(p_sub)
+            act_item = records[i]['result']
+            rd_num = records[i]['round']
+            
+            if act_item == "PASS":
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": "패스 (PASS)",
+                    "추천 구멍": "-",
+                    "적중 여부": "통계 제외"
+                })
+            elif pr:
+                act_s, act_l, act_o = ITEM_MAP[act_item]
+                if pr['top1']:
+                    t1_val = pr['top1'][1]
+                    t1_name = pr['top1'][0]
+                    t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+                    if pr['top2']:
+                        t2_val = pr['top2'][1]
+                        t2_name = pr['top2'][0]
+                        t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+                    else:
+                        t2_ok = False
+                    c_chk = "성공" if (t1_ok or t2_ok) else "실패"
+                else:
+                    c_chk = "관망(패스)"
+                
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": f"{act_item} ({act_o})",
+                    "추천 구멍": pr['top_combination'],
+                    "적중 여부": c_chk
+                })
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.markdown("오늘 세부 결과 기록 없음")
+    else:
+        st.markdown("기록 축적 중...")
