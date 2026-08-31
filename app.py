@@ -68,53 +68,99 @@ def analyze_prediction(records):
     if n < 4:
         return None
 
-    # 1. 🔥 장줄 구간 감지 (최근 3회 이상 동일)
-    if results[-1] == results[-2] == results[-3]:
-        last_item = results[-1]
-        rec_s, rec_l = ITEM_MAP[last_item][0], ITEM_MAP[last_item][1]
-        return (rec_s, 85.00, rec_l, 85.00, f"🔥 {last_item} 장줄 연속 (줄타기 추천)")
+    # 가중치 점수판 초기화 (우사, 우삼, 좌사, 좌삼)
+    scores = {'우사': 0.0, '우삼': 0.0, '좌사': 0.0, '좌삼': 0.0}
+    active_patterns = []
 
-    # 2. ⚡ 퐁당 구간 감지 (최근 3회 이상 연속 꺾임)
+    # 1. 🔥 순수 장줄 구간 (가중치 +40)
+    if results[-1] == results[-2] == results[-3]:
+        if n >= 6 and results[-4] == results[-5] == results[-6] and results[-1] != results[-4]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            scores[opp_item] += 35.0
+            active_patterns.append("삼박스 완료(꺾기)")
+        else:
+            last_item = results[-1]
+            scores[last_item] += 40.0
+            active_patterns.append("장줄(줄타기)")
+
+    # 1.5 🛡️ 장줄 1개 튐 노이즈 복원 (가중치 +35)
+    if n >= 5 and results[-2] == results[-3] == results[-4] == results[-5] and results[-1] != results[-2]:
+        restore_item = results[-2]
+        scores[restore_item] += 35.0
+        active_patterns.append("장줄 1개 튐 복원")
+
+    # 2. ⚡ 순수 퐁당 구간 (가중치 +35)
     if results[-1] != results[-2] and results[-2] != results[-3]:
         opp_item = OPPOSITE_MAP[results[-1]]
-        rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
-        return (rec_s, 80.00, rec_l, 80.00, "⚡ 퐁당 퐁당 구간 (꺾기 추천)")
+        scores[opp_item] += 35.0
+        active_patterns.append("퐁당(꺾기)")
 
-    # 3. 📦 투박스(2-2) 구간 감지
+    # 2.5 🛡️ 퐁당 1개 튐 노이즈 복원 (가중치 +30)
+    if n >= 5 and results[-2] != results[-3] and results[-3] != results[-4] and results[-4] != results[-5] and results[-1] == results[-2]:
+        opp_item = OPPOSITE_MAP[results[-1]]
+        scores[opp_item] += 30.0
+        active_patterns.append("퐁당 1개 튐 복원")
+
+    # 3. 📦 삼박스(3-3) 진행 구간 (가중치 +25)
+    if n >= 5 and results[-4] == results[-5] == results[-3] and results[-1] == results[-2] and results[-1] != results[-3]:
+        same_item = results[-1]
+        scores[same_item] += 25.0
+        active_patterns.append("삼박스 진행")
+
+    # 3.5 📦 투박스(2-2) 구간 (가중치 +25)
     if n >= 4:
-        # 패턴: A A B ? -> B 추천
         if results[-3] == results[-4] and results[-1] == results[-2] and results[-1] != results[-3]:
             opp_item = OPPOSITE_MAP[results[-1]]
-            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
-            return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 완료 예상 ➔ 꺾기")
-        # 패턴: A A B ? -> B 추천 (투박스 진행 중)
+            scores[opp_item] += 25.0
+            active_patterns.append("투박스 완료(꺾기)")
         elif results[-2] == results[-3] and results[-1] != results[-2]:
             same_item = results[-1]
-            rec_s, rec_l = ITEM_MAP[same_item][0], ITEM_MAP[same_item][1]
-            return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 진행 구간 ➔ 줄타기")
+            scores[same_item] += 25.0
+            active_patterns.append("투박스 진행")
 
-    # 4. 📊 일반 과거 패턴 다수결 분석
+    # 4. 🪞 데칼(대칭) 패턴 (가중치 +20)
+    if n >= 5:
+        if results[-1] == results[-2] and results[-3] == results[-4] and results[-1] != results[-3]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            scores[opp_item] += 20.0
+            active_patterns.append("데칼 완료")
+        elif results[-1] == results[-2] and results[-1] != results[-3]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            scores[opp_item] += 18.0
+            active_patterns.append("데칼(1-2-1)")
+
+    # 5. 📊 과거 패턴 다수결 매칭 (동적 가중치 +10 ~ +30)
     p3 = results[-3:]
     m3 = [results[j+3] for j in range(n-3) if results[j:j+3] == p3]
     p2 = results[-2:]
     m2 = [results[j+2] for j in range(n-2) if results[j:j+2] == p2]
 
     target = m3 if len(m3) >= 3 else m2
-    used_pattern = "3회 패턴 매칭" if len(m3) >= 3 else "2회 패턴 매칭"
-    if not target:
+    if target:
+        tot = len(target)
+        item_counts = Counter(target)
+        for item, count in item_counts.items():
+            ratio = count / tot
+            scores[item] += (ratio * 30.0)  # 다수결 비율에 따른 가중치 산정
+        active_patterns.append("과거 패턴 매칭")
+
+    # 최고 점수 항목 선출
+    best_item = max(scores, key=scores.get)
+    best_score = scores[best_item]
+
+    if best_score == 0.0:
         return None
 
-    tot = len(target)
-    s_counts = Counter([ITEM_MAP[x][0] for x in target])
-    l_counts = Counter([ITEM_MAP[x][1] for x in target])
+    rec_s, rec_l = ITEM_MAP[best_item][0], ITEM_MAP[best_item][1]
 
-    rec_s = '우' if s_counts['우'] >= s_counts['좌'] else '좌'
-    s_prob = (max(s_counts['우'], s_counts['좌']) / tot) * 100.0
+    # 확률 및 통계 수치 산정 (점수 기반 비율 계산)
+    total_score_sum = sum(scores.values())
+    prob = (best_score / total_score_sum * 100.0) if total_score_sum > 0 else 50.0
 
-    rec_l = '사' if l_counts['사'] >= l_counts['삼'] else '삼'
-    l_prob = (max(l_counts['사'], l_counts['삼']) / tot) * 100.0
+    pat_summary = " + ".join(active_patterns[:2]) if active_patterns else "일반 분석"
+    status_text = f"⚖️ 가중치 종합 [{pat_summary}] (점수: {best_score:.1f}점)"
 
-    return (rec_s, s_prob, rec_l, l_prob, f"일반 {used_pattern}")
+    return (rec_s, prob, rec_l, prob, status_text)
 
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
@@ -333,7 +379,7 @@ else:
         st.markdown(f"**구간 : {pat}**")
         st.markdown("---")
         st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
-        st.markdown(f"출발 : **{rec_s}** `{s_p:.2f}%` / 줄수 : **{rec_l}** `{l_p:.2f}%` ➔ **[{rec_s}{rec_l}]**")
+        st.markdown(f"출발 : **{rec_s}** / 줄수 : **{rec_l}** ➔ **[{rec_s}{rec_l}]**")
     else:
         st.markdown("**구간 : 분석 데이터 부족**")
         st.markdown("---")
