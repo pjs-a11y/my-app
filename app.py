@@ -53,7 +53,7 @@ def save_data(records):
     except Exception:
         pass
 
-# [독립 구멍 전용] 4대 패턴 분석 함수
+# [회차 길이에 따른 가중치 보완된] 4대 패턴 분석 함수
 def analyze_pure_pattern(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -68,40 +68,57 @@ def analyze_pure_pattern(stream, val1, val2):
                 streak += 1
             else:
                 break
-        prob = min(68.0 + (streak * 3.0), 90.0)
+        prob = min(68.0 + (streak * 3.5), 92.0)
         return rec, prob, f"🔥 {rec} 장줄({streak}연속)"
 
-    # 2. ⚡ 퐁당 구간 (3회 연속 꺾임)
+    # 2. ⚡ 퐁당 구간 (연속 꺾임 깊이 가중치 적용)
     if stream[-1] != stream[-2] and stream[-2] != stream[-3]:
+        streak = 3
+        for idx in range(4, min(n + 1, 10)):
+            if stream[-idx + 1] != stream[-idx]:
+                streak += 1
+            else:
+                break
         opp_val = val2 if stream[-1] == val1 else val1
-        return opp_val, 78.0, "⚡ 퐁당(꺾기)"
+        prob = min(72.0 + (streak * 2.0), 90.0)
+        return opp_val, prob, f"⚡ 퐁당({streak}회 지속)"
 
-    # 3. 📶 계단 패턴 (1-2-3 / 3-2-1)
+    # 3. 📦 투박스(2-2) / 삼박스(3-3) 패턴 (누적 회차 깊이 반영)
+    if n >= 4:
+        # 투박스 진행 시점 (2개-2개 패턴 중 1개 나온 시점 ➔ 2개째 채우기)
+        if stream[-2] == stream[-3] and stream[-1] != stream[-2]:
+            streak = 3
+            # 과거 투박스 리듬 연속성 스캔
+            for idx in range(4, min(n, 12)):
+                if (idx % 2 == 1 and stream[-idx] == stream[-idx+1]) or (idx % 2 == 0 and stream[-idx] != stream[-idx+1]):
+                    streak += 1
+                else:
+                    break
+            same_val = stream[-1]
+            prob = min(73.0 + (streak * 2.0), 92.0)
+            return same_val, prob, f"📦 투박스 진행({streak}회차 유지)"
+
+        # 투박스 완료 시점 (2개-2개 완성 후 꺾기)
+        elif stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
+            opp_val = val2 if stream[-1] == val1 else val1
+            return opp_val, 76.0, "📦 투박스 완료(꺾기)"
+
+    # 4. 📶 계단 패턴 (1-2-3 / 3-2-1)
     if n >= 6:
         if stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4] and stream[-4] != stream[-5]:
             same_val = stream[-1]
-            return same_val, 76.0, "📶 123 계단(이음)"
+            return same_val, 77.0, "📶 123 계단(이음)"
         elif stream[-1] == stream[-2] == stream[-3] and stream[-3] != stream[-4] and stream[-4] == stream[-5] and stream[-5] != stream[-6]:
             opp_val = val2 if stream[-1] == val1 else val1
-            return opp_val, 75.0, "📶 123 계단(꺾기)"
+            return opp_val, 76.0, "📶 123 계단(꺾기)"
         elif stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4] == stream[-5]:
             opp_val = val2 if stream[-1] == val1 else val1
-            return opp_val, 74.0, "📶 321 계단(꺾기)"
-
-    # 4. 📦 투박스(2-2) 완료 및 진행 구간
-    if n >= 4:
-        if stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
-            opp_val = val2 if stream[-1] == val1 else val1
-            return opp_val, 73.0, "📦 투박스 완료(꺾기)"
-        elif stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-            same_val = stream[-1]
-            return same_val, 71.0, "📦 투박스 진행(이음)"
+            return opp_val, 75.0, "📶 321 계단(꺾기)"
 
     return "-", 50.0, "⚠️ 조건미부합(패스)"
 
-# 메인 예측 분석 함수 (PASS 회차 완벽 필터링)
+# 메인 예측 분석 함수
 def analyze_prediction(records):
-    # PASS를 제외한 실제 결과 데이터만 추출
     valid_records = [r for r in records if r['result'] in ITEM_MAP][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
@@ -143,7 +160,6 @@ def analyze_prediction(records):
         'status': status_text
     }
 
-# 통계 연산 (PASS 회차 제외)
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
         eval_records = records[-limit_recent:]
@@ -159,7 +175,6 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
 
     for i in range(4, n):
         act = eval_records[i]['result']
-        # PASS 회차는 통계 분석 대상에서 제외
         if act not in ITEM_MAP:
             continue
 
@@ -396,7 +411,6 @@ else:
     m1, m2, m3, m4 = st.columns(4)
     if m1.button("패스", use_container_width=True):
         push_backup()
-        # 패스 시 PASS 저장
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         save_data(st.session_state.records)
         st.toast(f"{next_round}회차 패스 처리 완료")
