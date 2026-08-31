@@ -68,7 +68,6 @@ def analyze_prediction(records):
     if n < 4:
         return None
 
-    # 순수 패턴 가중치 점수판 (과거 다수결 제거됨)
     scores = {'우사': 0.0, '우삼': 0.0, '좌사': 0.0, '좌삼': 0.0}
     active_patterns = []
 
@@ -138,20 +137,10 @@ def analyze_prediction(records):
 
     rec_s, rec_l = ITEM_MAP[best_item][0], ITEM_MAP[best_item][1]
 
-    # 출발 및 줄수 가중치 점수 분리 집계
-    score_s = {'우': 0.0, '좌': 0.0}
-    score_l = {'사': 0.0, '삼': 0.0}
-
-    for item, sc in scores.items():
-        s_val, l_val, _ = ITEM_MAP[item]
-        score_s[s_val] += sc
-        score_l[l_val] += sc
-
-    total_s = score_s['우'] + score_s['좌']
-    total_l = score_l['사'] + score_l['삼']
-
-    s_prob = (score_s[rec_s] / total_s * 100.0) if total_s > 0 else 50.0
-    l_prob = (score_l[rec_l] / total_l * 100.0) if total_l > 0 else 50.0
+    # 점수 가중치 기반 현실적 신뢰도 % 산정 (최대 85%, 최소 60%)
+    base_prob = 55.0 + min(best_score * 0.75, 30.0)
+    s_prob = base_prob
+    l_prob = base_prob
 
     pat_summary = " + ".join(active_patterns)
     status_text = f"🎯 순수 패턴 감지 [{pat_summary}] (점수: {best_score:.1f}점)"
