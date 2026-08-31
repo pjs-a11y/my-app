@@ -1,31 +1,26 @@
 import os
-import re
+import copy
 import pandas as pd
 import streamlit as st
 from datetime import datetime
 from collections import Counter
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 정밀 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 분석기", page_icon="📊", layout="centered")
 
-# 모바일 한 화면에 쏙 들어오도록 CSS 스타일 수정
+# 모바일 세로 스크롤 최소화 CSS
 st.markdown("""
 <style>
-    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; padding-left: 0.8rem !important; padding-right: 0.8rem !important; }
-    h1 { font-size: 1.4rem !important; margin-bottom: 0.2rem !important; padding-top: 0rem !important; }
-    h2, h3 { font-size: 1.05rem !important; margin-top: 0.4rem !important; margin-bottom: 0.2rem !important; }
-    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
-    div[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
-    div[data-testid="stMetricDelta"] { font-size: 0.7rem !important; }
-    .stButton>button { padding: 0.3rem 0.2rem !important; font-size: 0.85rem !important; }
-    hr { margin: 0.4rem 0 !important; }
-    .element-container { margin-bottom: 0.3rem !important; }
+    .block-container { padding: 0.5rem 0.6rem !important; }
+    h1, h2, h3 { display: none !important; }
+    p, div, span { font-size: 0.82rem !important; line-height: 1.35 !important; }
+    .stButton>button { padding: 0.35rem 0.1rem !important; font-size: 0.85rem !important; font-weight: bold; }
+    hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
 </style>
 """, unsafe_allow_html=True)
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
 DATA_FILE = os.path.join(BASE_DIR, "ladder_data_history.txt")
-LOG_FILE = os.path.join(BASE_DIR, "ladder_predict_log.txt")
 MAX_DATA_SIZE = 3000
 
 ITEM_MAP = {
@@ -34,6 +29,8 @@ ITEM_MAP = {
     '좌사': ('좌', '사', '홀'),
     '좌삼': ('좌', '삼', '짝')
 }
+
+WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
 def load_data():
     records = []
@@ -56,61 +53,18 @@ def save_data(records):
     except Exception:
         pass
 
-def save_log(date, rd, rec_s, rec_l, actual):
-    act_s, act_l = ITEM_MAP[actual][0], ITEM_MAP[actual][1]
-    s_ok = (rec_s == act_s)
-    l_ok = (rec_l == act_l)
-    log_line = f"{date}|{rd}|예측:{rec_s}{rec_l}|실제:{actual}|방향:{'성공' if s_ok else '실패'}|줄수:{'성공' if l_ok else '실패'}\n"
-    try:
-        with open(LOG_FILE, "a", encoding="utf-8") as f:
-            f.write(log_line)
-    except Exception:
-        pass
-
-def calculate_stats(records):
-    n = len(records)
-    if n < 5:
-        return None
-    
-    total_preds = 0
-    combo_wins = 0
-    dir_wins = 0
-    
-    for i in range(4, n):
-        past_sub = records[:i]
-        pred = analyze_prediction(past_sub)
-        if pred:
-            actual = records[i]['result']
-            rec_s, _, rec_l, _, _ = pred
-            pred_combo = f"{rec_s}{rec_l}"
-            act_s = ITEM_MAP[actual][0]
-            
-            total_preds += 1
-            if pred_combo == actual:
-                combo_wins += 1
-            if rec_s == act_s:
-                dir_wins += 1
-                
-    if total_preds == 0:
-        return None
-        
-    combo_rate = (combo_wins / total_preds) * 100.0
-    dir_rate = (dir_wins / total_preds) * 100.0
-    
-    return {
-        'total': total_preds,
-        'combo_wins': combo_wins,
-        'combo_loses': total_preds - combo_wins,
-        'combo_rate': combo_rate,
-        'dir_wins': dir_wins,
-        'dir_rate': dir_rate
-    }
-
 def analyze_prediction(records):
     results = [r['result'] for r in records]
     n = len(results)
     if n < 4:
         return None
+
+    last_4 = results[-4:]
+    pattern_status = "일반 패턴 구간"
+    if len(set(last_4)) == 1:
+        pattern_status = f"🔥 {last_4[-1]} 장줄 연속 구간"
+    elif n >= 4 and results[-1] != results[-2] and results[-2] != results[-3] and results[-3] != results[-4]:
+        pattern_status = "⚡ 퐁당 퐁당 유의 구간"
 
     p3 = results[-3:]
     m3 = [results[j+3] for j in range(n-3) if results[j:j+3] == p3]
@@ -118,7 +72,6 @@ def analyze_prediction(records):
     m2 = [results[j+2] for j in range(n-2) if results[j:j+2] == p2]
 
     target = m3 if len(m3) >= 3 else m2
-    used_p = "3회 패턴" if len(m3) >= 3 else "2회 패턴"
     if not target:
         return None
 
@@ -132,127 +85,251 @@ def analyze_prediction(records):
     rec_l = '사' if l_counts['사'] >= l_counts['삼'] else '삼'
     l_prob = (max(l_counts['사'], l_counts['삼']) / tot) * 100.0
 
-    return (rec_s, s_prob, rec_l, l_prob, used_p)
+    return (rec_s, s_prob, rec_l, l_prob, pattern_status)
 
-# 메인 UI 화면
-st.markdown("<h1>📊 키노사다리 정밀 분석기</h1>", unsafe_allow_html=True)
+def calculate_detailed_stats(records, target_date=None):
+    n = len(records)
+    if n < 5:
+        return None
 
+    tot_count = 0
+    c_win, s_win, l_win = 0, 0, 0
+
+    for i in range(4, n):
+        if target_date and records[i]['date'] != target_date:
+            continue
+
+        past_sub = records[:i]
+        pred = analyze_prediction(past_sub)
+        if pred:
+            act = records[i]['result']
+            act_s, act_l = ITEM_MAP[act][0], ITEM_MAP[act][1]
+            rec_s, _, rec_l, _, _ = pred
+            
+            tot_count += 1
+            if f"{rec_s}{rec_l}" == act: c_win += 1
+            if rec_s == act_s: s_win += 1
+            if rec_l == act_l: l_win += 1
+
+    if tot_count == 0:
+        return None
+
+    return {
+        'total': tot_count,
+        'c_win': c_win, 'c_lose': tot_count - c_win, 'c_rate': (c_win/tot_count)*100.0,
+        's_win': s_win, 's_lose': tot_count - s_win, 's_rate': (s_win/tot_count)*100.0,
+        'l_win': l_win, 'l_lose': tot_count - l_win, 'l_rate': (l_win/tot_count)*100.0,
+    }
+
+# 백업 상태 관리
 if "records" not in st.session_state:
     st.session_state.records = load_data()
+if "history_stack" not in st.session_state:
+    st.session_state.history_stack = []
+
+def push_backup():
+    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
+    if len(st.session_state.history_stack) > 10:
+        st.session_state.history_stack.pop(0)
 
 records = st.session_state.records
 
+# 1. 데이터가 없을 때 초기 설정 화면
 if not records:
-    st.subheader("⚙️ 최초 환경 설정")
+    st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
     init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
     
     st.write("첫 회차 결과 선택:")
     col1, col2, col3, col4 = st.columns(4)
-    btn_us = col1.button("우사")
-    btn_um = col2.button("우삼")
-    btn_js = col3.button("좌사")
-    btn_jm = col4.button("좌삼")
-    
-    selected_val = None
-    if btn_us: selected_val = "우사"
-    elif btn_um: selected_val = "우삼"
-    elif btn_js: selected_val = "좌사"
-    elif btn_jm: selected_val = "좌삼"
+    sel = None
+    if col1.button("우사"): sel = "우사"
+    elif col2.button("우삼"): sel = "우삼"
+    elif col3.button("좌사"): sel = "좌사"
+    elif col4.button("좌삼"): sel = "좌삼"
 
-    if selected_val:
+    if sel:
+        push_backup()
         st.session_state.records.append({
             'date': init_date.strftime("%Y-%m-%d"),
             'round': int(init_round),
-            'result': selected_val
+            'result': sel
         })
         save_data(st.session_state.records)
         st.rerun()
 
+    # 데이터가 없을 때도 되돌리기 버튼 제공
+    if st.session_state.history_stack:
+        st.markdown("---")
+        if st.button("↩️ 이전 상태로 되돌리기", use_container_width=True):
+            st.session_state.records = st.session_state.history_stack.pop()
+            save_data(st.session_state.records)
+            st.toast("직전 상태로 복원되었습니다.")
+            st.rerun()
+
 else:
-    last_record = records[-1]
-    curr_date = last_record['date']
-    next_round = last_record['round'] + 1
+    last_rec = records[-1]
+    curr_date = last_rec['date']
+    next_round = last_rec['round'] + 1
     if next_round > 288:
         next_round = 1
 
-    st.caption(f"📅 **날짜:** {curr_date} | 🔢 **다음 입력 회차:** {next_round}회차")
+    # 상단 요약
+    st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
+    st.markdown("---")
 
-    # 실시간 승률 통계
-    stats = calculate_stats(records)
-    if stats:
-        st.markdown("### 🏆 누적 예측 성적")
-        sc1, sc2, sc3 = st.columns(3)
-        sc1.metric("조합 승률", f"{stats['combo_rate']:.1f}%", f"{stats['combo_wins']}승 {stats['combo_loses']}패")
-        sc2.metric("방향 적중률", f"{stats['dir_rate']:.1f}%", f"{stats['dir_wins']}회")
-        sc3.metric("예측 횟수", f"{stats['total']}회")
-        st.markdown("---")
-
-    # 예측 엔진 구동
-    pred_res = analyze_prediction(records)
-    
-    if pred_res:
-        rec_s, s_p, rec_l, l_p, p_name = pred_res
-        st.markdown("### 💡 이번 회차 예측")
-        col_a, col_b, col_c = st.columns(3)
-        col_a.metric("추천 방향", rec_s, f"{s_p:.0f}%")
-        col_b.metric("추천 줄수", rec_l, f"{l_p:.0f}%")
-        col_c.metric("추천 조합", f"{rec_s}{rec_l}", ITEM_MAP[rec_s+rec_l][2])
+    # 누적 통계
+    all_stat = calculate_detailed_stats(records)
+    if all_stat:
+        st.markdown(f"**[ 누적 통계 (총 {all_stat['total']}개) ]**")
+        st.markdown(f"조합 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 승률 {all_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {all_stat['total']}개 / {all_stat['s_win']}승 {all_stat['s_lose']}패 승률 {all_stat['s_rate']:.1f}%")
+        st.markdown(f"줄수 : {all_stat['total']}개 / {all_stat['l_win']}승 {all_stat['l_lose']}패 승률 {all_stat['l_rate']:.1f}%")
     else:
-        st.info("💡 4회차 이상 입력 시 승률과 예측이 표시됩니다.")
+        st.markdown("**[ 누적 통계 ]** 데이터 축적 중 (4개 이상 필요)")
 
     st.markdown("---")
-    st.markdown("### 🎯 결과 빠른 입력")
 
-    c1, c2, c3, c4 = st.columns(4)
-    b_us = c1.button("우사", use_container_width=True)
-    b_um = c2.button("우삼", use_container_width=True)
-    b_js = c3.button("좌사", use_container_width=True)
-    b_jm = c4.button("좌삼", use_container_width=True)
+    # 오늘 통계
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
 
-    input_item = None
-    if b_us: input_item = "우사"
-    elif b_um: input_item = "우삼"
-    elif b_js: input_item = "좌사"
-    elif b_jm: input_item = "좌삼"
-
-    if input_item:
-        if pred_res:
-            save_log(curr_date, next_round, pred_res[0], pred_res[2], input_item)
-        
-        st.session_state.records.append({
-            'date': curr_date,
-            'round': next_round,
-            'result': input_item
-        })
-        save_data(st.session_state.records)
-        st.rerun()
-
-    st.markdown("---")
-    col_undo, col_skip, col_reset = st.columns(3)
+    today_stat = calculate_detailed_stats(records, target_date=curr_date)
     
-    if col_undo.button("↩️ 취소", use_container_width=True):
-        popped = st.session_state.records.pop()
-        save_data(st.session_state.records)
-        st.toast(f"{popped['round']}회차 취소됨")
-        st.rerun()
+    st.markdown(f"**오늘 {curr_date} {w_str}**")
+    if today_stat:
+        st.markdown(f"조합 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 승률 {today_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {today_stat['total']}개 / {today_stat['s_win']}승 {today_stat['s_lose']}패 승률 {today_stat['s_rate']:.1f}%")
+        st.markdown(f"줄수 : {today_stat['total']}개 / {today_stat['l_win']}승 {today_stat['l_lose']}패 승률 {today_stat['l_rate']:.1f}%")
+    else:
+        st.markdown("오늘 입력된 예측 데이터 없음")
 
-    if col_skip.button("⏩ 패스", use_container_width=True):
+    st.markdown("---")
+
+    # 이전 회차 분석
+    if len(records) >= 5:
+        prev_sub = records[:-1]
+        prev_pred = analyze_prediction(prev_sub)
+        prev_actual = last_rec['result']
+        
+        if prev_pred:
+            p_s, _, p_l, _, _ = prev_pred
+            act_s, act_l = ITEM_MAP[prev_actual][0], ITEM_MAP[prev_actual][1]
+            s_res = "성공" if p_s == act_s else "실패"
+            l_res = "성공" if p_l == act_l else "실패"
+            c_res = "성공" if f"{p_s}{p_l}" == prev_actual else "실패"
+            
+            st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
+            st.markdown(f"결과 : **{prev_actual}** / 예측 : **{p_s}{p_l}**")
+            st.markdown(f"출발 : **{s_res}** / 줄수 : **{l_res}** / 조합 : **{c_res}**")
+    st.markdown("---")
+
+    # 이번회차 예측
+    curr_pred = analyze_prediction(records)
+    st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
+    if curr_pred:
+        rec_s, s_p, rec_l, l_p, pat = curr_pred
+        st.markdown(f"구간: `{pat}`")
+        st.markdown(f"출발 : **{rec_s}** `{s_p:.2f}%` / 줄수 : **{rec_l}** `{l_p:.2f}%` ➔ **[{rec_s}{rec_l}]**")
+    else:
+        st.markdown("데이터 분석 중...")
+
+    st.markdown("---")
+    st.markdown("**결과 입력**")
+
+    # 결과 버튼 4개
+    c1, c2, c3, c4 = st.columns(4)
+    b_um = c1.button("우삼", use_container_width=True)
+    b_us = c2.button("우사", use_container_width=True)
+    b_jm = c3.button("좌삼", use_container_width=True)
+    b_js = c4.button("좌사", use_container_width=True)
+
+    input_val = None
+    if b_um: input_val = "우삼"
+    elif b_us: input_val = "우사"
+    elif b_jm: input_val = "좌삼"
+    elif b_js: input_val = "좌사"
+
+    if input_val:
+        push_backup()
         st.session_state.records.append({
             'date': curr_date,
             'round': next_round,
-            'result': "우사"
+            'result': input_val
         })
+        save_data(st.session_state.records)
+        st.rerun()
+
+    st.markdown("---")
+
+    # 제어 버튼 (패스 / 직전취소 / 초기화 / 되돌리기)
+    m1, m2, m3, m4 = st.columns(4)
+    
+    if m1.button("패스", use_container_width=True):
+        push_backup()
+        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "우사"})
+        save_data(st.session_state.records)
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
-    if col_reset.button("🧹 초기화", use_container_width=True):
+    if m2.button("직전취소", use_container_width=True):
+        if st.session_state.records:
+            push_backup()
+            popped = st.session_state.records.pop()
+            save_data(st.session_state.records)
+            st.toast(f"{popped['round']}회차 취소")
+            st.rerun()
+
+    if m3.button("초기화", use_container_width=True):
+        push_backup()
         st.session_state.records = []
         if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
-        if os.path.exists(LOG_FILE): os.remove(LOG_FILE)
+        st.toast("초기화되었습니다.")
         st.rerun()
 
+    if m4.button("되돌리기", use_container_width=True):
+        if st.session_state.history_stack:
+            st.session_state.records = st.session_state.history_stack.pop()
+            save_data(st.session_state.records)
+            st.toast("직전 상태로 복원 완료!")
+            st.rerun()
+        else:
+            st.toast("되돌릴 이전 기록이 없습니다.")
+
     st.markdown("---")
-    st.markdown("### 🔍 최근 5개 흐름")
-    recent_5 = [f"{r['round']}회:{r['result']}" for r in records[-5:]]
-    st.write(" ➔ ".join(recent_5))
+
+    # 세부 결과 표
+    st.markdown("**세부 결과**")
+    if len(records) >= 5:
+        rows = []
+        n_rec = len(records)
+        for i in range(max(4, n_rec-10), n_rec):
+            p_sub = records[:i]
+            pr = analyze_prediction(p_sub)
+            act_item = records[i]['result']
+            rd_num = records[i]['round']
+            
+            if pr:
+                pr_s, _, pr_l, _, _ = pr
+                pr_str = f"{pr_s}{pr_l}"
+                act_s, act_l = ITEM_MAP[act_item][0], ITEM_MAP[act_item][1]
+                
+                s_chk = "성공" if pr_s == act_s else "실패"
+                l_chk = "성공" if pr_l == act_l else "실패"
+                c_chk = "성공" if pr_str == act_item else "실패"
+                
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "예측 / 결과": f"{pr_str} / {act_item}",
+                    "출발 줄수": f"{s_chk} {l_chk}",
+                    "조합": c_chk
+                })
+        
+        if rows:
+            df = pd.DataFrame(rows[::-1])
+            st.dataframe(df, hide_index=True, use_container_width=True)
+    else:
+        st.markdown("기록 축적 중...")
