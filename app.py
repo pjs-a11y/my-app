@@ -31,6 +31,13 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '짝')
 }
 
+OPPOSITE_MAP = {
+    '우사': '좌삼',
+    '우삼': '좌사',
+    '좌사': '우삼',
+    '좌삼': '우사'
+}
+
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
 def load_data():
@@ -61,19 +68,39 @@ def analyze_prediction(records):
     if n < 4:
         return None
 
-    last_4 = results[-4:]
-    pattern_status = "일반 패턴 구간"
-    if len(set(last_4)) == 1:
-        pattern_status = f"🔥 {last_4[-1]} 장줄 연속 구간"
-    elif n >= 4 and results[-1] != results[-2] and results[-2] != results[-3] and results[-3] != results[-4]:
-        pattern_status = "⚡ 퐁당 퐁당 유의 구간"
+    # 1. 🔥 장줄 구간 감지 (최근 3회 이상 동일)
+    if results[-1] == results[-2] == results[-3]:
+        last_item = results[-1]
+        rec_s, rec_l = ITEM_MAP[last_item][0], ITEM_MAP[last_item][1]
+        return (rec_s, 85.00, rec_l, 85.00, f"🔥 {last_item} 장줄 연속 (줄타기 추천)")
 
+    # 2. ⚡ 퐁당 구간 감지 (최근 3회 이상 연속 꺾임)
+    if results[-1] != results[-2] and results[-2] != results[-3]:
+        opp_item = OPPOSITE_MAP[results[-1]]
+        rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
+        return (rec_s, 80.00, rec_l, 80.00, "⚡ 퐁당 퐁당 구간 (꺾기 추천)")
+
+    # 3. 📦 투박스(2-2) 구간 감지
+    if n >= 4:
+        # 패턴: A A B ? -> B 추천
+        if results[-3] == results[-4] and results[-1] == results[-2] and results[-1] != results[-3]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
+            return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 완료 예상 ➔ 꺾기")
+        # 패턴: A A B ? -> B 추천 (투박스 진행 중)
+        elif results[-2] == results[-3] and results[-1] != results[-2]:
+            same_item = results[-1]
+            rec_s, rec_l = ITEM_MAP[same_item][0], ITEM_MAP[same_item][1]
+            return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 진행 구간 ➔ 줄타기")
+
+    # 4. 📊 일반 과거 패턴 다수결 분석
     p3 = results[-3:]
     m3 = [results[j+3] for j in range(n-3) if results[j:j+3] == p3]
     p2 = results[-2:]
     m2 = [results[j+2] for j in range(n-2) if results[j:j+2] == p2]
 
     target = m3 if len(m3) >= 3 else m2
+    used_pattern = "3회 패턴 매칭" if len(m3) >= 3 else "2회 패턴 매칭"
     if not target:
         return None
 
@@ -87,7 +114,7 @@ def analyze_prediction(records):
     rec_l = '사' if l_counts['사'] >= l_counts['삼'] else '삼'
     l_prob = (max(l_counts['사'], l_counts['삼']) / tot) * 100.0
 
-    return (rec_s, s_prob, rec_l, l_prob, pattern_status)
+    return (rec_s, s_prob, rec_l, l_prob, f"일반 {used_pattern}")
 
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
@@ -161,7 +188,6 @@ if st.session_state.show_bulk:
     
     col_b1, col_b2 = st.columns(2)
     if col_b1.button("📥 데이터 일괄 추가", use_container_width=True):
-        # 우사, 우삼, 좌사, 좌삼 패턴 추출
         found_items = re.findall(r'우사|우삼|좌사|좌삼', raw_text)
         if found_items:
             push_backup()
