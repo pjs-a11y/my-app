@@ -54,77 +54,44 @@ def save_data(records):
     except Exception:
         pass
 
-# 단일 속성(배열) 독립 패턴 분석 함수
-def analyze_single_stream(stream, val1, val2):
+# [장줄, 퐁당, 투박스] 3개 전용 독립 분석 함수
+def analyze_pure_pattern(stream, val1, val2):
     n = len(stream)
     if n < 4:
-        return val1, 50.0, "데이터 부족"
+        return "-", 50.0, "관망(패스)"
 
-    score1, score2 = 0.0, 0.0
-    patterns = []
-
-    # 1. 🔥 장줄 연속 감지
+    # 1. 🔥 장줄 구간 (3연속 이상)
     if stream[-1] == stream[-2] == stream[-3]:
-        if stream[-1] == val1:
-            score1 += 40.0
-        else:
-            score2 += 40.0
-        patterns.append(f"{stream[-1]} 장줄")
+        rec = stream[-1]
+        streak = 3
+        for idx in range(4, min(n + 1, 10)):
+            if stream[-idx] == rec:
+                streak += 1
+            else:
+                break
+        prob = min(65.0 + (streak * 3.0), 88.0)
+        return rec, prob, f"🔥 {rec} 장줄({streak}연속)"
 
-    # 1.5 🛡️ 장줄 1개 튐 노이즈 복원
-    elif n >= 5 and stream[-2] == stream[-3] == stream[-4] == stream[-5] and stream[-1] != stream[-2]:
-        restore_val = stream[-2]
-        if restore_val == val1:
-            score1 += 35.0
-        else:
-            score2 += 35.0
-        patterns.append(f"{restore_val} 장줄 복원")
-
-    # 2. ⚡ 퐁당 꺾기 감지
-    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
+    # 2. ⚡ 퐁당 구간 (3회 연속 꺾임)
+    if stream[-1] != stream[-2] and stream[-2] != stream[-3]:
         opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1:
-            score1 += 35.0
-        else:
-            score2 += 35.0
-        patterns.append("퐁당 꺾기")
+        return opp_val, 75.0, "⚡ 퐁당(꺾기)"
 
-    # 2.5 🛡️ 퐁당 1개 튐 복원
-    elif n >= 5 and stream[-2] != stream[-3] and stream[-3] != stream[-4] and stream[-4] != stream[-5] and stream[-1] == stream[-2]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1:
-            score1 += 30.0
-        else:
-            score2 += 30.0
-        patterns.append("퐁당 복원")
+    # 3. 📦 투박스(2-2) 완료 및 진행 구간
+    if n >= 4:
+        # 투박스 완료 시점 (2개 - 2개 완성 후 꺾기)
+        if stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
+            opp_val = val2 if stream[-1] == val1 else val1
+            return opp_val, 72.0, "📦 투박스 완료(꺾기)"
+        # 투박스 진행 시점 (2개 나온 뒤 1개 출현 ➔ 2개 채우기)
+        elif stream[-2] == stream[-3] and stream[-1] != stream[-2]:
+            same_val = stream[-1]
+            return same_val, 70.0, "📦 투박스 진행(이음)"
 
-    # 3. 📦 투박스(2-2) / 삼박스(3-3)
-    elif n >= 4 and stream[-1] == stream[-2] and stream[-3] == stream[-4] and stream[-1] != stream[-3]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1:
-            score1 += 25.0
-        else:
-            score2 += 25.0
-        patterns.append("투박스 꺾기")
+    # 장줄, 퐁당, 투박스 조건 미성립 시 관망
+    return "-", 50.0, "⚠️ 조건 미부합(관망)"
 
-    # 흐름 가중치 기본 점수
-    recent_count = Counter(stream[-5:])
-    score1 += recent_count[val1] * 2.0
-    score2 += recent_count[val2] * 2.0
-
-    if score1 >= score2:
-        rec_val = val1
-        top_score = score1
-    else:
-        rec_val = val2
-        top_score = score2
-
-    prob = 55.0 + min(top_score * 0.6, 32.0)
-    pat_str = patterns[0] if patterns else "일반 흐름"
-
-    return rec_val, prob, pat_str
-
-# 메인 예측 분석 함수 (완전 독립 3원화)
+# 메인 예측 분석 함수
 def analyze_prediction(records):
     target_records = records[-MAX_DATA_SIZE:]
     if len(target_records) < 4:
@@ -134,20 +101,30 @@ def analyze_prediction(records):
     l_stream = [ITEM_MAP[r['result']][1] for r in target_records]
     o_stream = [ITEM_MAP[r['result']][2] for r in target_records]
 
-    rec_s, prob_s, pat_s = analyze_single_stream(s_stream, '우', '좌')
-    rec_l, prob_l, pat_l = analyze_single_stream(l_stream, '사', '삼')
-    rec_o, prob_o, pat_o = analyze_single_stream(o_stream, '짝', '홀')
+    rec_s, prob_s, pat_s = analyze_pure_pattern(s_stream, '우', '좌')
+    rec_l, prob_l, pat_l = analyze_pure_pattern(l_stream, '사', '삼')
+    rec_o, prob_o, pat_o = analyze_pure_pattern(o_stream, '짝', '홀')
 
-    indicators = [
-        ('출발', rec_s, prob_s, pat_s),
-        ('줄수', rec_l, prob_l, pat_l),
-        ('홀짝', rec_o, prob_o, pat_o)
-    ]
-    indicators.sort(key=lambda x: x[2], reverse=True)
-    top1, top2 = indicators[0], indicators[1]
+    indicators = []
+    if rec_s != "-": indicators.append(('출발', rec_s, prob_s, pat_s))
+    if rec_l != "-": indicators.append(('줄수', rec_l, prob_l, pat_l))
+    if rec_o != "-": indicators.append(('홀짝', rec_o, prob_o, pat_o))
 
-    top_combination_str = f"{top1[1]} + {top2[1]} ({top1[0]}+{top2[0]})"
-    status_text = f"🎯 독립 패턴 감지 [출발:{pat_s} | 줄수:{pat_l} | 홀짝:{pat_o}]"
+    # 조건에 부합하는 패턴이 2개 이상일 때 상위 2개 조합 구성
+    if len(indicators) >= 2:
+        indicators.sort(key=lambda x: x[2], reverse=True)
+        top1, top2 = indicators[0], indicators[1]
+        top_combination_str = f"{top1[1]} + {top2[1]} ({top1[0]}+{top2[0]})"
+        status_text = f"🎯 핵심 패턴 감지 [{top1[0]}:{top1[3]} | {top2[0]}:{top2[3]}]"
+    elif len(indicators) == 1:
+        top1 = indicators[0]
+        top2 = None
+        top_combination_str = f"{top1[1]} ({top1[0]} 단독 픽)"
+        status_text = f"🎯 핵심 패턴 감지 [{top1[0]}:{top1[3]}]"
+    else:
+        top1, top2 = None, None
+        top_combination_str = "관망 (패스 추천)"
+        status_text = "⚠️ [장줄/퐁당/투박스] 구간 미성립 ➔ 관망 권장"
 
     return {
         'rec_s': rec_s, 'prob_s': prob_s, 'pat_s': pat_s,
@@ -177,20 +154,25 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
 
         past_sub = eval_records[:i]
         pred = analyze_prediction(past_sub)
-        if pred:
+        if pred and (pred['top1'] is not None):
             act = eval_records[i]['result']
             act_s, act_l, act_o = ITEM_MAP[act]
             
             tot_count += 1
-            s_ok = (pred['rec_s'] == act_s)
-            l_ok = (pred['rec_l'] == act_l)
-            o_ok = (pred['rec_o'] == act_o)
+            s_ok = (pred['rec_s'] == act_s) if pred['rec_s'] != "-" else False
+            l_ok = (pred['rec_l'] == act_l) if pred['rec_l'] != "-" else False
+            o_ok = (pred['rec_o'] == act_o) if pred['rec_o'] != "-" else False
             
-            t1_val, t2_val = pred['top1'][1], pred['top2'][1]
-            t1_name, t2_name = pred['top1'][0], pred['top2'][0]
-            
+            t1_val = pred['top1'][1]
+            t1_name = pred['top1'][0]
             t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
-            t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            
+            if pred['top2']:
+                t2_val = pred['top2'][1]
+                t2_name = pred['top2'][0]
+                t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            else:
+                t2_ok = False
             
             if t1_ok or t2_ok:
                 c_win += 1
@@ -203,10 +185,10 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
 
     return {
         'total': tot_count,
-        'c_win': c_win, 'c_lose': tot_count - c_win, 'c_rate': (c_win/tot_count)*100.0,
-        's_win': s_win, 's_lose': tot_count - s_win, 's_rate': (s_win/tot_count)*100.0,
-        'l_win': l_win, 'l_lose': tot_count - l_win, 'l_rate': (l_win/tot_count)*100.0,
-        'o_win': o_win, 'o_lose': tot_count - o_win, 'o_rate': (o_win/tot_count)*100.0,
+        'c_win': c_win, 'c_lose': tot_count - c_win, 'c_rate': (c_win/tot_count)*100.0 if tot_count>0 else 0.0,
+        's_win': s_win, 's_lose': tot_count - s_win, 's_rate': (s_win/tot_count)*100.0 if tot_count>0 else 0.0,
+        'l_win': l_win, 'l_lose': tot_count - l_win, 'l_rate': (l_win/tot_count)*100.0 if tot_count>0 else 0.0,
+        'o_win': o_win, 'o_lose': tot_count - o_win, 'o_rate': (o_win/tot_count)*100.0 if tot_count>0 else 0.0,
     }
 
 # 백업 상태 관리
@@ -314,9 +296,9 @@ else:
 
     # 1. 전체 누적 통계
     all_stat = calculate_detailed_stats(records)
-    st.markdown("**누적**")
+    st.markdown("**누적 통계 (장줄/퐁당/투박스 타겟)**")
     if all_stat:
-        st.markdown(f"조합(상위2개) : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
+        st.markdown(f"추천 적중 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
         st.markdown(f"출발 : {all_stat['s_win']}승 {all_stat['s_lose']}패 ({all_stat['s_rate']:.1f}%) | 줄수 : {all_stat['l_win']}승 {all_stat['l_lose']}패 ({all_stat['l_rate']:.1f}%) | 홀짝 : {all_stat['o_win']}승 {all_stat['o_lose']}패 ({all_stat['o_rate']:.1f}%)")
     else:
         st.markdown("데이터 축적 중...")
@@ -326,9 +308,9 @@ else:
     # 2. 최근 3000개 누적 통계
     recent_stat = calculate_detailed_stats(records, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 누적**")
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계**")
     if recent_stat:
-        st.markdown(f"조합(상위2개) : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
+        st.markdown(f"추천 적중 : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
         st.markdown(f"출발 : {recent_stat['s_win']}승 {recent_stat['s_lose']}패 ({recent_stat['s_rate']:.1f}%) | 줄수 : {recent_stat['l_win']}승 {recent_stat['l_lose']}패 ({recent_stat['l_rate']:.1f}%) | 홀짝 : {recent_stat['o_win']}승 {recent_stat['o_lose']}패 ({recent_stat['o_rate']:.1f}%)")
     else:
         st.markdown("데이터 축적 중...")
@@ -345,7 +327,7 @@ else:
     today_stat = calculate_detailed_stats(records, target_date=curr_date)
     st.markdown(f"**오늘 : {curr_date} {w_str}**")
     if today_stat:
-        st.markdown(f"조합(상위2개) : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
+        st.markdown(f"추천 적중 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
         st.markdown(f"출발 : {today_stat['s_win']}승 {today_stat['s_lose']}패 ({today_stat['s_rate']:.1f}%) | 줄수 : {today_stat['l_win']}승 {today_stat['l_lose']}패 ({today_stat['l_rate']:.1f}%) | 홀짝 : {today_stat['o_win']}승 {today_stat['o_lose']}패 ({today_stat['o_rate']:.1f}%)")
     else:
         st.markdown("데이터 축적 중...")
@@ -358,17 +340,23 @@ else:
         prev_pred = analyze_prediction(prev_sub)
         prev_actual = last_rec['result']
         
-        if prev_pred:
+        if prev_pred and prev_pred['top1']:
             act_s, act_l, act_o = ITEM_MAP[prev_actual]
-            t1_val, t2_val = prev_pred['top1'][1], prev_pred['top2'][1]
-            t1_name, t2_name = prev_pred['top1'][0], prev_pred['top2'][0]
+            t1_val = prev_pred['top1'][1]
+            t1_name = prev_pred['top1'][0]
             
             t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
-            t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            if prev_pred['top2']:
+                t2_val = prev_pred['top2'][1]
+                t2_name = prev_pred['top2'][0]
+                t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            else:
+                t2_ok = False
+                
             c_res = "성공" if (t1_ok or t2_ok) else "실패"
             
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
-            st.markdown(f"결과 : **{prev_actual} ({act_o})** / 예측 조합: **[{prev_pred['top_combination']}]** ➔ **{c_res}**")
+            st.markdown(f"결과 : **{prev_actual} ({act_o})** / 예측 : **[{prev_pred['top_combination']}]** ➔ **{c_res}**")
         else:
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
             st.markdown(f"결과 : **{prev_actual}** / 예측 : **관망(패스)**")
@@ -383,7 +371,7 @@ else:
         st.markdown(f"출발 : **{curr_pred['rec_s']}** `{curr_pred['prob_s']:.1f}%` ({curr_pred['pat_s']})")
         st.markdown(f"줄수 : **{curr_pred['rec_l']}** `{curr_pred['prob_l']:.1f}%` ({curr_pred['pat_l']})")
         st.markdown(f"홀짝 : **{curr_pred['rec_o']}** `{curr_pred['prob_o']:.1f}%` ({curr_pred['pat_o']})")
-        st.markdown(f"🔥 **추천 상위 2개 조합 : [{curr_pred['top_combination']}]**")
+        st.markdown(f"🔥 **추천 상위 조합 : [{curr_pred['top_combination']}]**")
     else:
         st.markdown("**구간 : 분석 데이터 부족**")
         st.markdown("---")
@@ -469,13 +457,19 @@ else:
             
             if pr:
                 act_s, act_l, act_o = ITEM_MAP[act_item]
-                t1_val, t2_val = pr['top1'][1], pr['top2'][1]
-                t1_name, t2_name = pr['top1'][0], pr['top2'][0]
-                
-                t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
-                t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
-                
-                c_chk = "성공" if (t1_ok or t2_ok) else "실패"
+                if pr['top1']:
+                    t1_val = pr['top1'][1]
+                    t1_name = pr['top1'][0]
+                    t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+                    if pr['top2']:
+                        t2_val = pr['top2'][1]
+                        t2_name = pr['top2'][0]
+                        t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+                    else:
+                        t2_ok = False
+                    c_chk = "성공" if (t1_ok or t2_ok) else "실패"
+                else:
+                    c_chk = "관망(패스)"
                 
                 rows.append({
                     "회차": f"{rd_num}회",
