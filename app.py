@@ -8,13 +8,13 @@ from collections import Counter
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 분석기", page_icon="📊", layout="centered")
 
-# 모바일 세로 스크롤 최소화 CSS
+# 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
 <style>
     .block-container { padding: 0.5rem 0.6rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.82rem !important; line-height: 1.35 !important; }
-    .stButton>button { padding: 0.35rem 0.1rem !important; font-size: 0.85rem !important; font-weight: bold; }
+    .stButton>button { padding: 0.35rem 0.05rem !important; font-size: 0.82rem !important; font-weight: bold; }
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -54,7 +54,9 @@ def save_data(records):
         pass
 
 def analyze_prediction(records):
-    results = [r['result'] for r in records]
+    # 최근 3000개 이하 범위 내에서 분석
+    target_records = records[-MAX_DATA_SIZE:]
+    results = [r['result'] for r in target_records]
     n = len(results)
     if n < 4:
         return None
@@ -87,8 +89,14 @@ def analyze_prediction(records):
 
     return (rec_s, s_prob, rec_l, l_prob, pattern_status)
 
-def calculate_detailed_stats(records, target_date=None):
-    n = len(records)
+def calculate_detailed_stats(records, target_date=None, limit_recent=None):
+    # 최근 N개 필터링 옵션
+    if limit_recent:
+        eval_records = records[-limit_recent:]
+    else:
+        eval_records = records
+
+    n = len(eval_records)
     if n < 5:
         return None
 
@@ -96,13 +104,13 @@ def calculate_detailed_stats(records, target_date=None):
     c_win, s_win, l_win = 0, 0, 0
 
     for i in range(4, n):
-        if target_date and records[i]['date'] != target_date:
+        if target_date and eval_records[i]['date'] != target_date:
             continue
 
-        past_sub = records[:i]
+        past_sub = eval_records[:i]
         pred = analyze_prediction(past_sub)
         if pred:
-            act = records[i]['result']
+            act = eval_records[i]['result']
             act_s, act_l = ITEM_MAP[act][0], ITEM_MAP[act][1]
             rec_s, _, rec_l, _, _ = pred
             
@@ -177,19 +185,32 @@ else:
     st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
     st.markdown("---")
 
-    # 누적 통계
+    # 1. 전체 누적 통계
     all_stat = calculate_detailed_stats(records)
+    st.markdown("**누적**")
     if all_stat:
-        st.markdown(f"**[ 누적 통계 (총 {all_stat['total']}개) ]**")
-        st.markdown(f"조합 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 승률 {all_stat['c_rate']:.1f}%")
-        st.markdown(f"출발 : {all_stat['total']}개 / {all_stat['s_win']}승 {all_stat['s_lose']}패 승률 {all_stat['s_rate']:.1f}%")
-        st.markdown(f"줄수 : {all_stat['total']}개 / {all_stat['l_win']}승 {all_stat['l_lose']}패 승률 {all_stat['l_rate']:.1f}%")
+        st.markdown(f"조합 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {all_stat['total']}개 / {all_stat['s_win']}승 {all_stat['s_lose']}패 / 승율 {all_stat['s_rate']:.1f}%")
+        st.markdown(f"줄수 : {all_stat['total']}개 / {all_stat['l_win']}승 {all_stat['l_lose']}패 / 승율 {all_stat['l_rate']:.1f}%")
     else:
-        st.markdown("**[ 누적 통계 ]** 데이터 축적 중 (4개 이상 필요)")
+        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
 
     st.markdown("---")
 
-    # 오늘 통계
+    # 2. 최근 3000개 누적 통계
+    recent_stat = calculate_detailed_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적**")
+    if recent_stat:
+        st.markdown(f"조합 : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {recent_stat['total']}개 / {recent_stat['s_win']}승 {recent_stat['s_lose']}패 / 승율 {recent_stat['s_rate']:.1f}%")
+        st.markdown(f"줄수 : {recent_stat['total']}개 / {recent_stat['l_win']}승 {recent_stat['l_lose']}패 / 승율 {recent_stat['l_rate']:.1f}%")
+    else:
+        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
+
+    st.markdown("---")
+
+    # 3. 오늘 통계
     try:
         dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
         w_str = WEEKDAYS[dt_obj.weekday()]
@@ -197,18 +218,17 @@ else:
         w_str = ""
 
     today_stat = calculate_detailed_stats(records, target_date=curr_date)
-    
-    st.markdown(f"**오늘 {curr_date} {w_str}**")
+    st.markdown(f"**오늘 : {curr_date} {w_str}**")
     if today_stat:
-        st.markdown(f"조합 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 승률 {today_stat['c_rate']:.1f}%")
-        st.markdown(f"출발 : {today_stat['total']}개 / {today_stat['s_win']}승 {today_stat['s_lose']}패 승률 {today_stat['s_rate']:.1f}%")
-        st.markdown(f"줄수 : {today_stat['total']}개 / {today_stat['l_win']}승 {today_stat['l_lose']}패 승률 {today_stat['l_rate']:.1f}%")
+        st.markdown(f"조합 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {today_stat['total']}개 / {today_stat['s_win']}승 {today_stat['s_lose']}패 / 승율 {today_stat['s_rate']:.1f}%")
+        st.markdown(f"줄수 : {today_stat['total']}개 / {today_stat['l_win']}승 {today_stat['l_lose']}패 / 승율 {today_stat['l_rate']:.1f}%")
     else:
-        st.markdown("오늘 입력된 예측 데이터 없음")
+        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
 
     st.markdown("---")
 
-    # 이전 회차 분석
+    # 4. 이전 회차 분석
     if len(records) >= 5:
         prev_sub = records[:-1]
         prev_pred = analyze_prediction(prev_sub)
@@ -226,20 +246,23 @@ else:
             st.markdown(f"출발 : **{s_res}** / 줄수 : **{l_res}** / 조합 : **{c_res}**")
     st.markdown("---")
 
-    # 이번회차 예측
+    # 5. 구간 정보 및 이번회차 예측
     curr_pred = analyze_prediction(records)
-    st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
     if curr_pred:
         rec_s, s_p, rec_l, l_p, pat = curr_pred
-        st.markdown(f"구간: `{pat}`")
+        st.markdown(f"**구간 : {pat}**")
+        st.markdown("---")
+        st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
         st.markdown(f"출발 : **{rec_s}** `{s_p:.2f}%` / 줄수 : **{rec_l}** `{l_p:.2f}%` ➔ **[{rec_s}{rec_l}]**")
     else:
-        st.markdown("데이터 분석 중...")
+        st.markdown("**구간 : 분석 데이터 부족**")
+        st.markdown("---")
+        st.markdown(f"**이번회차예측 ( {next_round}회차 )**\n데이터 축적 중...")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 결과 버튼 4개
+    # 가로 배치 4개 버튼
     c1, c2, c3, c4 = st.columns(4)
     b_um = c1.button("우삼", use_container_width=True)
     b_us = c2.button("우사", use_container_width=True)
@@ -264,7 +287,7 @@ else:
 
     st.markdown("---")
 
-    # 제어 버튼 (패스 / 직전취소 / 초기화 / 되돌리기)
+    # 가로 배치 제어 버튼 (패스 / 직전취소 / 초기화 / 되돌리기)
     m1, m2, m3, m4 = st.columns(4)
     
     if m1.button("패스", use_container_width=True):
@@ -300,16 +323,12 @@ else:
 
     st.markdown("---")
 
-    # 세부 결과 표 (오늘 날짜의 최신 회차순 정렬)
+    # 6. 세부 결과 표 (당일 최신순 정렬)
     st.markdown("**세부 결과**")
     if len(records) >= 5:
         rows = []
-        n_rec = len(records)
-        
-        # 전체 데이터 중 '오늘 날짜(curr_date)' 데이터 인덱스만 필터링
         today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
         
-        # 오늘 데이터가 존재하면 최신 인덱스부터 역순으로 조회
         for i in reversed(today_indices):
             if i < 4:
                 continue
@@ -338,6 +357,6 @@ else:
             df = pd.DataFrame(rows)
             st.dataframe(df, hide_index=True, use_container_width=True)
         else:
-            st.markdown("오늘 입력된 세부 예측 결과가 없습니다.")
+            st.markdown("오늘 세부 결과 기록 없음")
     else:
         st.markdown("기록 축적 중...")
