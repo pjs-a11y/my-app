@@ -83,7 +83,7 @@ def analyze_prediction(records):
 # 메인 UI 화면
 st.title("📊 키노사다리 정밀 분석기")
 
-# 세션 상태 초기화 (오류 수정 부분)
+# 세션 상태 초기화
 if "records" not in st.session_state:
     st.session_state.records = load_data()
 
@@ -166,10 +166,17 @@ else:
         save_data(st.session_state.records)
         st.rerun()
 
-    # 제어 버튼 (건너뛰기 / 초기화)
+    # 제어 버튼 (마지막 입력 취소 / 건너뛰기 / 초기화)
     st.markdown("---")
-    col_skip, col_reset = st.columns(2)
-    if col_skip.button("⏩ 회차 건너뛰기 (패스)", use_container_width=True):
+    col_undo, col_skip, col_reset = st.columns(3)
+    
+    if col_undo.button("↩️ 마지막 입력 취소", use_container_width=True):
+        popped = st.session_state.records.pop()
+        save_data(st.session_state.records)
+        st.toast(f"{popped['round']}회차 ({popped['result']}) 입력을 취소했습니다.")
+        st.rerun()
+
+    if col_skip.button("⏩ 회차 건너뛰기", use_container_width=True):
         st.session_state.records.append({
             'date': curr_date,
             'round': next_round,
@@ -187,5 +194,5 @@ else:
     # 최근 기록 표시
     st.markdown("---")
     st.markdown("### 🔍 최근 5개 흐름")
-    recent_5 = [r['result'] for r in records[-5:]]
+    recent_5 = [f"{r['round']}회:{r['result']}" for r in records[-5:]]
     st.write(" ➔ ".join(recent_5))
