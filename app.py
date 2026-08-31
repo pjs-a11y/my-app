@@ -131,21 +131,51 @@ def analyze_prediction(records):
     best_item = max(scores, key=scores.get)
     best_score = scores[best_item]
 
-    # 특수 패턴 감지가 없을 때 (관망)
     if best_score == 0.0:
-        return ("-", 50.0, "-", 50.0, "⚠️ 특수 패턴 없음 (패스/관망 권장)")
+        return None
 
-    rec_s, rec_l = ITEM_MAP[best_item][0], ITEM_MAP[best_item][1]
+    # 출발, 줄수, 홀짝 가중치 개별 집계
+    score_s = {'우': 0.0, '좌': 0.0}
+    score_l = {'사': 0.0, '삼': 0.0}
+    score_o = {'홀': 0.0, '짝': 0.0}
 
-    # 점수 가중치 기반 현실적 신뢰도 % 산정 (최대 85%, 최소 60%)
-    base_prob = 55.0 + min(best_score * 0.75, 30.0)
-    s_prob = base_prob
-    l_prob = base_prob
+    for item, sc in scores.items():
+        s_val, l_val, o_val = ITEM_MAP[item]
+        score_s[s_val] += sc
+        score_l[l_val] += sc
+        score_o[o_val] += sc
+
+    rec_s = '우' if score_s['우'] >= score_s['좌'] else '좌'
+    rec_l = '사' if score_l['사'] >= score_l['삼'] else '삼'
+    rec_o = '짝' if score_o['짝'] >= score_o['홀'] else '홀'
+
+    prob_s = 55.0 + min(score_s[rec_s] * 0.75, 30.0)
+    prob_l = 55.0 + min(score_l[rec_l] * 0.75, 30.0)
+    prob_o = 55.0 + min(score_o[rec_o] * 0.75, 30.0)
+
+    # 3가지 지표 중 상위 2개 확률 추출
+    indicators = [
+        ('출발', rec_s, prob_s),
+        ('줄수', rec_l, prob_l),
+        ('홀짝', rec_o, prob_o)
+    ]
+    # 확률 높은 순서 정렬
+    indicators.sort(key=lambda x: x[2], reverse=True)
+    top1, top2 = indicators[0], indicators[1]
+
+    top_combination_str = f"{top1[1]} + {top2[1]} ({top1[0]}+{top2[0]})"
 
     pat_summary = " + ".join(active_patterns)
     status_text = f"🎯 순수 패턴 감지 [{pat_summary}] (점수: {best_score:.1f}점)"
 
-    return (rec_s, s_prob, rec_l, l_prob, status_text)
+    return {
+        'rec_s': rec_s, 'prob_s': prob_s,
+        'rec_l': rec_l, 'prob_l': prob_l,
+        'rec_o': rec_o, 'prob_o': prob_o,
+        'top1': top1, 'top2': top2,
+        'top_combination': top_combination_str,
+        'status': status_text
+    }
 
 def calculate_detailed_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
@@ -158,7 +188,7 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
         return None
 
     tot_count = 0
-    c_win, s_win, l_win = 0, 0, 0
+    c_win, s_win, l_win, o_win = 0, 0, 0, 0
 
     for i in range(4, n):
         if target_date and eval_records[i]['date'] != target_date:
@@ -166,21 +196,27 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
 
         past_sub = eval_records[:i]
         pred = analyze_prediction(past_sub)
-        if pred and pred[0] != "-":
+        if pred:
             act = eval_records[i]['result']
-            act_s, act_l = ITEM_MAP[act][0], ITEM_MAP[act][1]
-            rec_s, _, rec_l, _, _ = pred
+            act_s, act_l, act_o = ITEM_MAP[act]
             
             tot_count += 1
-            s_ok = (rec_s == act_s)
-            l_ok = (rec_l == act_l)
+            s_ok = (pred['rec_s'] == act_s)
+            l_ok = (pred['rec_l'] == act_l)
+            o_ok = (pred['rec_o'] == act_o)
             
-            if s_ok or l_ok: 
+            # 상위 2개 조합 맞춤 판정
+            t1_val, t2_val = pred['top1'][1], pred['top2'][1]
+            t1_name, t2_name = pred['top1'][0], pred['top2'][0]
+            
+            t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+            t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            
+            if t1_ok or t2_ok:
                 c_win += 1
-            if s_ok: 
-                s_win += 1
-            if l_ok: 
-                l_win += 1
+            if s_ok: s_win += 1
+            if l_ok: l_win += 1
+            if o_ok: o_win += 1
 
     if tot_count == 0:
         return None
@@ -190,6 +226,7 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
         'c_win': c_win, 'c_lose': tot_count - c_win, 'c_rate': (c_win/tot_count)*100.0,
         's_win': s_win, 's_lose': tot_count - s_win, 's_rate': (s_win/tot_count)*100.0,
         'l_win': l_win, 'l_lose': tot_count - l_win, 'l_rate': (l_win/tot_count)*100.0,
+        'o_win': o_win, 'o_lose': tot_count - o_win, 'o_rate': (o_win/tot_count)*100.0,
     }
 
 # 백업 상태 관리
@@ -288,7 +325,6 @@ else:
     if next_round > 288:
         next_round = 1
 
-    # 상단 요약 및 대량 입력 버튼
     st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
         st.session_state.show_bulk = True
@@ -300,11 +336,10 @@ else:
     all_stat = calculate_detailed_stats(records)
     st.markdown("**누적**")
     if all_stat:
-        st.markdown(f"조합 : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
-        st.markdown(f"출발 : {all_stat['total']}개 / {all_stat['s_win']}승 {all_stat['s_lose']}패 / 승율 {all_stat['s_rate']:.1f}%")
-        st.markdown(f"줄수 : {all_stat['total']}개 / {all_stat['l_win']}승 {all_stat['l_lose']}패 / 승율 {all_stat['l_rate']:.1f}%")
+        st.markdown(f"조합(상위2개) : {all_stat['total']}개 / {all_stat['c_win']}승 {all_stat['c_lose']}패 / 승율 {all_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {all_stat['s_win']}승 {all_stat['s_lose']}패 ({all_stat['s_rate']:.1f}%) | 줄수 : {all_stat['l_win']}승 {all_stat['l_lose']}패 ({all_stat['l_rate']:.1f}%) | 홀짝 : {all_stat['o_win']}승 {all_stat['o_lose']}패 ({all_stat['o_rate']:.1f}%)")
     else:
-        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
@@ -313,11 +348,10 @@ else:
     recent_cnt = min(len(records), MAX_DATA_SIZE)
     st.markdown(f"**최근 {recent_cnt}개 누적**")
     if recent_stat:
-        st.markdown(f"조합 : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
-        st.markdown(f"출발 : {recent_stat['total']}개 / {recent_stat['s_win']}승 {recent_stat['s_lose']}패 / 승율 {recent_stat['s_rate']:.1f}%")
-        st.markdown(f"줄수 : {recent_stat['total']}개 / {recent_stat['l_win']}승 {recent_stat['l_lose']}패 / 승율 {recent_stat['l_rate']:.1f}%")
+        st.markdown(f"조합(상위2개) : {recent_stat['total']}개 / {recent_stat['c_win']}승 {recent_stat['c_lose']}패 / 승율 {recent_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {recent_stat['s_win']}승 {recent_stat['s_lose']}패 ({recent_stat['s_rate']:.1f}%) | 줄수 : {recent_stat['l_win']}승 {recent_stat['l_lose']}패 ({recent_stat['l_rate']:.1f}%) | 홀짝 : {recent_stat['o_win']}승 {recent_stat['o_lose']}패 ({recent_stat['o_rate']:.1f}%)")
     else:
-        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
@@ -331,11 +365,10 @@ else:
     today_stat = calculate_detailed_stats(records, target_date=curr_date)
     st.markdown(f"**오늘 : {curr_date} {w_str}**")
     if today_stat:
-        st.markdown(f"조합 : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
-        st.markdown(f"출발 : {today_stat['total']}개 / {today_stat['s_win']}승 {today_stat['s_lose']}패 / 승율 {today_stat['s_rate']:.1f}%")
-        st.markdown(f"줄수 : {today_stat['total']}개 / {today_stat['l_win']}승 {today_stat['l_lose']}패 / 승율 {today_stat['l_rate']:.1f}%")
+        st.markdown(f"조합(상위2개) : {today_stat['total']}개 / {today_stat['c_win']}승 {today_stat['c_lose']}패 / 승율 {today_stat['c_rate']:.1f}%")
+        st.markdown(f"출발 : {today_stat['s_win']}승 {today_stat['s_lose']}패 ({today_stat['s_rate']:.1f}%) | 줄수 : {today_stat['l_win']}승 {today_stat['l_lose']}패 ({today_stat['l_rate']:.1f}%) | 홀짝 : {today_stat['o_win']}승 {today_stat['o_lose']}패 ({today_stat['o_rate']:.1f}%)")
     else:
-        st.markdown("조합 : 0개 / 0승 0패 / 승율 0.0%\n출발 : 0개 / 0승 0패 / 승율 0.0%\n줄수 : 0개 / 0승 0패 / 승율 0.0%")
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
@@ -345,16 +378,17 @@ else:
         prev_pred = analyze_prediction(prev_sub)
         prev_actual = last_rec['result']
         
-        if prev_pred and prev_pred[0] != "-":
-            p_s, _, p_l, _, _ = prev_pred
-            act_s, act_l = ITEM_MAP[prev_actual][0], ITEM_MAP[prev_actual][1]
-            s_res = "성공" if p_s == act_s else "실패"
-            l_res = "성공" if p_l == act_l else "실패"
-            c_res = "성공" if (p_s == act_s or p_l == act_l) else "실패"
+        if prev_pred:
+            act_s, act_l, act_o = ITEM_MAP[prev_actual]
+            t1_val, t2_val = prev_pred['top1'][1], prev_pred['top2'][1]
+            t1_name, t2_name = prev_pred['top1'][0], prev_pred['top2'][0]
+            
+            t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+            t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+            c_res = "성공" if (t1_ok or t2_ok) else "실패"
             
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
-            st.markdown(f"결과 : **{prev_actual}** / 예측 : **{p_s}{p_l}**")
-            st.markdown(f"출발 : **{s_res}** / 줄수 : **{l_res}** / 조합 : **{c_res}**")
+            st.markdown(f"결과 : **{prev_actual} ({act_o})** / 예측 조합: **[{prev_pred['top_combination']}]** ➔ **{c_res}**")
         else:
             st.markdown(f"**이전회차 ( {last_rec['round']}회차 )**")
             st.markdown(f"결과 : **{prev_actual}** / 예측 : **관망(패스)**")
@@ -363,14 +397,11 @@ else:
     # 5. 구간 정보 및 이번회차 예측
     curr_pred = analyze_prediction(records)
     if curr_pred:
-        rec_s, s_p, rec_l, l_p, pat = curr_pred
-        st.markdown(f"**구간 : {pat}**")
+        st.markdown(f"**구간 : {curr_pred['status']}**")
         st.markdown("---")
         st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
-        if rec_s != "-":
-            st.markdown(f"출발 : **{rec_s}** `{s_p:.2f}%` / 줄수 : **{rec_l}** `{l_p:.2f}%` ➔ **[{rec_s}{rec_l}]**")
-        else:
-            st.markdown("⚠️ 확실한 특수 패턴이 없습니다. **패스(관망)를 추천합니다.**")
+        st.markdown(f"출발 : **{curr_pred['rec_s']}** `{curr_pred['prob_s']:.1f}%` | 줄수 : **{curr_pred['rec_l']}** `{curr_pred['prob_l']:.1f}%` | 홀짝 : **{curr_pred['rec_o']}** `{curr_pred['prob_o']:.1f}%`")
+        st.markdown(f"🔥 **추천 상위 2개 조합 : [{curr_pred['top_combination']}]**")
     else:
         st.markdown("**구간 : 분석 데이터 부족**")
         st.markdown("---")
@@ -455,28 +486,21 @@ else:
             rd_num = records[i]['round']
             
             if pr:
-                if pr[0] != "-":
-                    pr_s, _, pr_l, _, _ = pr
-                    pr_str = f"{pr_s}{pr_l}"
-                    act_s, act_l = ITEM_MAP[act_item][0], ITEM_MAP[act_item][1]
-                    
-                    s_chk = "성공" if pr_s == act_s else "실패"
-                    l_chk = "성공" if pr_l == act_l else "실패"
-                    c_chk = "성공" if (pr_s == act_s or pr_l == act_l) else "실패"
-                    
-                    rows.append({
-                        "회차": f"{rd_num}회",
-                        "예측 / 결과": f"{pr_str} / {act_item}",
-                        "출발 줄수": f"{s_chk} {l_chk}",
-                        "조합": c_chk
-                    })
-                else:
-                    rows.append({
-                        "회차": f"{rd_num}회",
-                        "예측 / 결과": f"관망 / {act_item}",
-                        "출발 줄수": "패스 패스",
-                        "조합": "패스"
-                    })
+                act_s, act_l, act_o = ITEM_MAP[act_item]
+                t1_val, t2_val = pr['top1'][1], pr['top2'][1]
+                t1_name, t2_name = pr['top1'][0], pr['top2'][0]
+                
+                t1_ok = (t1_val == act_s) if t1_name == '출발' else ((t1_val == act_l) if t1_name == '줄수' else (t1_val == act_o))
+                t2_ok = (t2_val == act_s) if t2_name == '출발' else ((t2_val == act_l) if t2_name == '줄수' else (t2_val == act_o))
+                
+                c_chk = "성공" if (t1_ok or t2_ok) else "실패"
+                
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": f"{act_item} ({act_o})",
+                    "추천 조합": pr['top_combination'],
+                    "적중 여부": c_chk
+                })
         
         if rows:
             df = pd.DataFrame(rows)
