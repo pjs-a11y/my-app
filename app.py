@@ -70,6 +70,12 @@ def analyze_prediction(records):
 
     # 1. 🔥 순수 장줄 구간 감지 (최근 3회 이상 동일)
     if results[-1] == results[-2] == results[-3]:
+        # 만약 최근 3개만 장줄이고 이전은 다르면 삼박스 꺾기 검사로 이동
+        if n >= 6 and results[-4] == results[-5] == results[-6] and results[-1] != results[-4]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
+            return (rec_s, 78.00, rec_l, 78.00, "📦 삼박스(3-3) 완료 구간 ➔ 꺾기")
+            
         last_item = results[-1]
         rec_s, rec_l = ITEM_MAP[last_item][0], ITEM_MAP[last_item][1]
         return (rec_s, 85.00, rec_l, 85.00, f"🔥 {last_item} 장줄 연속 (줄타기 추천)")
@@ -81,21 +87,33 @@ def analyze_prediction(records):
             rec_s, rec_l = ITEM_MAP[restore_item][0], ITEM_MAP[restore_item][1]
             return (rec_s, 82.00, rec_l, 82.00, f"🛡️ 장줄 1개 튐 노이즈 감지 ➔ {restore_item} 복원 예상")
 
-    # 2. ⚡ 퐁당 구간 감지 (최근 3회 이상 연속 꺾임)
+    # 2. ⚡ 순수 퐁당 구간 감지 (최근 3회 이상 연속 꺾임)
     if results[-1] != results[-2] and results[-2] != results[-3]:
         opp_item = OPPOSITE_MAP[results[-1]]
         rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
         return (rec_s, 80.00, rec_l, 80.00, "⚡ 퐁당 퐁당 구간 (꺾기 추천)")
 
-    # 3. 📦 투박스(2-2) 및 변형 튐(2-2-3) 구간 감지
+    # 2.5 🛡️ 퐁당 1개 튐(노이즈) 복원 구간 감지 (예: 우-좌-우-좌-좌 -> 우 복원)
+    if n >= 5:
+        if results[-2] != results[-3] and results[-3] != results[-4] and results[-4] != results[-5] and results[-1] == results[-2]:
+            opp_item = OPPOSITE_MAP[results[-1]]
+            rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
+            return (rec_s, 78.00, rec_l, 78.00, "🛡️ 퐁당 1개 튐 노이즈 감지 ➔ 퐁당 복원 꺾기")
+
+    # 3. 📦 삼박스(3-3) 진행 구간 감지 (예: A A A B B -> B)
+    if n >= 5:
+        if results[-4] == results[-5] == results[-3] and results[-1] == results[-2] and results[-1] != results[-3]:
+            same_item = results[-1]
+            rec_s, rec_l = ITEM_MAP[same_item][0], ITEM_MAP[same_item][1]
+            return (rec_s, 76.00, rec_l, 76.00, "📦 삼박스(3-3) 진행 구간 ➔ 줄타기")
+
+    # 3.5 📦 투박스(2-2) 구간 감지
     if n >= 4:
-        # 정상 투박스 완료 시점 (A A B B -> A)
         if results[-3] == results[-4] and results[-1] == results[-2] and results[-1] != results[-3]:
             opp_item = OPPOSITE_MAP[results[-1]]
             rec_s, rec_l = ITEM_MAP[opp_item][0], ITEM_MAP[opp_item][1]
             return (rec_s, 75.00, rec_l, 75.00, "📦 투박스(2-2) 완료 예상 ➔ 꺾기")
             
-        # 투박스 진행 중 시점 (A A B -> B)
         elif results[-2] == results[-3] and results[-1] != results[-2]:
             same_item = results[-1]
             rec_s, rec_l = ITEM_MAP[same_item][0], ITEM_MAP[same_item][1]
