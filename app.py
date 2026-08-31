@@ -149,17 +149,16 @@ def analyze_prediction(records):
     rec_l = '사' if score_l['사'] >= score_l['삼'] else '삼'
     rec_o = '짝' if score_o['짝'] >= score_o['홀'] else '홀'
 
+    # 개별 점수에 상응하는 독립 확률 계산 (각각 개별 연산)
     prob_s = 55.0 + min(score_s[rec_s] * 0.75, 30.0)
     prob_l = 55.0 + min(score_l[rec_l] * 0.75, 30.0)
     prob_o = 55.0 + min(score_o[rec_o] * 0.75, 30.0)
 
-    # 3가지 지표 중 상위 2개 확률 추출
     indicators = [
         ('출발', rec_s, prob_s),
         ('줄수', rec_l, prob_l),
         ('홀짝', rec_o, prob_o)
     ]
-    # 확률 높은 순서 정렬
     indicators.sort(key=lambda x: x[2], reverse=True)
     top1, top2 = indicators[0], indicators[1]
 
@@ -205,7 +204,6 @@ def calculate_detailed_stats(records, target_date=None, limit_recent=None):
             l_ok = (pred['rec_l'] == act_l)
             o_ok = (pred['rec_o'] == act_o)
             
-            # 상위 2개 조합 맞춤 판정
             t1_val, t2_val = pred['top1'][1], pred['top2'][1]
             t1_name, t2_name = pred['top1'][0], pred['top2'][0]
             
