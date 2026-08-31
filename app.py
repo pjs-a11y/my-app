@@ -8,6 +8,21 @@ from collections import Counter
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 정밀 분석기", page_icon="📊", layout="centered")
 
+# 모바일 한 화면에 쏙 들어오도록 CSS 스타일 수정
+st.markdown("""
+<style>
+    .block-container { padding-top: 1rem !important; padding-bottom: 1rem !important; padding-left: 0.8rem !important; padding-right: 0.8rem !important; }
+    h1 { font-size: 1.4rem !important; margin-bottom: 0.2rem !important; padding-top: 0rem !important; }
+    h2, h3 { font-size: 1.05rem !important; margin-top: 0.4rem !important; margin-bottom: 0.2rem !important; }
+    div[data-testid="stMetricValue"] { font-size: 1.2rem !important; }
+    div[data-testid="stMetricLabel"] { font-size: 0.75rem !important; }
+    div[data-testid="stMetricDelta"] { font-size: 0.7rem !important; }
+    .stButton>button { padding: 0.3rem 0.2rem !important; font-size: 0.85rem !important; }
+    hr { margin: 0.4rem 0 !important; }
+    .element-container { margin-bottom: 0.3rem !important; }
+</style>
+""", unsafe_allow_html=True)
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals() else os.getcwd()
 DATA_FILE = os.path.join(BASE_DIR, "ladder_data_history.txt")
 LOG_FILE = os.path.join(BASE_DIR, "ladder_predict_log.txt")
@@ -53,14 +68,13 @@ def save_log(date, rd, rec_s, rec_l, actual):
         pass
 
 def calculate_stats(records):
-    """과거 예측 적중률 계산 (4회차 이후부터 예측이 생성되므로 그 이후 적중여부 집계)"""
     n = len(records)
     if n < 5:
         return None
     
     total_preds = 0
-    combo_wins = 0 # 조합(우사, 좌삼 등) 적중
-    dir_wins = 0   # 방향(우/좌) 적중
+    combo_wins = 0
+    dir_wins = 0
     
     for i in range(4, n):
         past_sub = records[:i]
@@ -68,8 +82,6 @@ def calculate_stats(records):
         if pred:
             actual = records[i]['result']
             rec_s, _, rec_l, _, _ = pred
-            
-            # 예측값과 실제값 비교
             pred_combo = f"{rec_s}{rec_l}"
             act_s = ITEM_MAP[actual][0]
             
@@ -123,15 +135,13 @@ def analyze_prediction(records):
     return (rec_s, s_prob, rec_l, l_prob, used_p)
 
 # 메인 UI 화면
-st.title("📊 키노사다리 정밀 분석기")
+st.markdown("<h1>📊 키노사다리 정밀 분석기</h1>", unsafe_allow_html=True)
 
-# 세션 상태 초기화
 if "records" not in st.session_state:
     st.session_state.records = load_data()
 
 records = st.session_state.records
 
-# 1. 초기 데이터가 없을 때 설정 화면
 if not records:
     st.subheader("⚙️ 최초 환경 설정")
     init_date = st.date_input("날짜 선택", datetime.now())
@@ -166,36 +176,34 @@ else:
     if next_round > 288:
         next_round = 1
 
-    st.info(f"📅 **날짜:** {curr_date} | 🔢 **다음 입력 회차:** {next_round}회차")
+    st.caption(f"📅 **날짜:** {curr_date} | 🔢 **다음 입력 회차:** {next_round}회차")
 
-    # 실시간 승률 통계 계산 및 표시
+    # 실시간 승률 통계
     stats = calculate_stats(records)
     if stats:
-        st.markdown("### 🏆 누적 예측 적중 성적 (승률)")
+        st.markdown("### 🏆 누적 예측 성적")
         sc1, sc2, sc3 = st.columns(3)
         sc1.metric("조합 승률", f"{stats['combo_rate']:.1f}%", f"{stats['combo_wins']}승 {stats['combo_loses']}패")
-        sc2.metric("방향 승률(우/좌)", f"{stats['dir_rate']:.1f}%", f"{stats['dir_wins']}회 적중")
-        sc3.metric("총 예측 횟수", f"{stats['total']}회")
+        sc2.metric("방향 적중률", f"{stats['dir_rate']:.1f}%", f"{stats['dir_wins']}회")
+        sc3.metric("예측 횟수", f"{stats['total']}회")
         st.markdown("---")
 
     # 예측 엔진 구동
     pred_res = analyze_prediction(records)
     
-    # 예측 결과 대시보드
     if pred_res:
         rec_s, s_p, rec_l, l_p, p_name = pred_res
-        st.markdown("### 💡 이번 회차 추천 예측")
+        st.markdown("### 💡 이번 회차 예측")
         col_a, col_b, col_c = st.columns(3)
-        col_a.metric("추천 방향", rec_s, f"{s_p:.1f}% 패턴확률")
-        col_b.metric("추천 줄수", rec_l, f"{l_p:.1f}% 패턴확률")
-        col_c.metric("조합", f"{rec_s}{rec_l}", ITEM_MAP[rec_s+rec_l][2])
+        col_a.metric("추천 방향", rec_s, f"{s_p:.0f}%")
+        col_b.metric("추천 줄수", rec_l, f"{l_p:.0f}%")
+        col_c.metric("추천 조합", f"{rec_s}{rec_l}", ITEM_MAP[rec_s+rec_l][2])
     else:
-        st.warning("⚠️ 승률 분석 및 다음 예측을 위해 데이터를 4회차 이상 입력해 주세요.")
+        st.info("💡 4회차 이상 입력 시 승률과 예측이 표시됩니다.")
 
     st.markdown("---")
-    st.markdown("### 🎯 결과 빠른 입력 (버튼 터치)")
+    st.markdown("### 🎯 결과 빠른 입력")
 
-    # 결과 터치 입력 버튼
     c1, c2, c3, c4 = st.columns(4)
     b_us = c1.button("우사", use_container_width=True)
     b_um = c2.button("우삼", use_container_width=True)
@@ -220,14 +228,13 @@ else:
         save_data(st.session_state.records)
         st.rerun()
 
-    # 제어 버튼 (마지막 입력 취소 / 건너뛰기 / 초기화)
     st.markdown("---")
     col_undo, col_skip, col_reset = st.columns(3)
     
-    if col_undo.button("↩️ 입력 취소", use_container_width=True):
+    if col_undo.button("↩️ 취소", use_container_width=True):
         popped = st.session_state.records.pop()
         save_data(st.session_state.records)
-        st.toast(f"{popped['round']}회차 ({popped['result']}) 입력을 취소했습니다.")
+        st.toast(f"{popped['round']}회차 취소됨")
         st.rerun()
 
     if col_skip.button("⏩ 패스", use_container_width=True):
@@ -236,16 +243,15 @@ else:
             'round': next_round,
             'result': "우사"
         })
-        st.toast(f"{next_round}회차를 건너뛰었습니다.")
+        st.toast(f"{next_round}회차 패스")
         st.rerun()
 
-    if col_reset.button("🧹 전체 초기화", use_container_width=True):
+    if col_reset.button("🧹 초기화", use_container_width=True):
         st.session_state.records = []
         if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
         if os.path.exists(LOG_FILE): os.remove(LOG_FILE)
         st.rerun()
 
-    # 최근 기록 표시
     st.markdown("---")
     st.markdown("### 🔍 최근 5개 흐름")
     recent_5 = [f"{r['round']}회:{r['result']}" for r in records[-5:]]
