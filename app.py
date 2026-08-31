@@ -31,13 +31,6 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '짝')
 }
 
-OPPOSITE_MAP = {
-    '우사': '좌삼',
-    '우삼': '좌사',
-    '좌사': '우삼',
-    '좌삼': '우사'
-}
-
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
 def load_data():
@@ -61,116 +54,105 @@ def save_data(records):
     except Exception:
         pass
 
+# 단일 속성(배열) 독립 패턴 분석 함수
+def analyze_single_stream(stream, val1, val2):
+    n = len(stream)
+    if n < 4:
+        return val1, 50.0, "데이터 부족"
+
+    score1, score2 = 0.0, 0.0
+    patterns = []
+
+    # 1. 🔥 장줄 연속 감지
+    if stream[-1] == stream[-2] == stream[-3]:
+        if stream[-1] == val1:
+            score1 += 40.0
+        else:
+            score2 += 40.0
+        patterns.append(f"{stream[-1]} 장줄")
+
+    # 1.5 🛡️ 장줄 1개 튐 노이즈 복원
+    elif n >= 5 and stream[-2] == stream[-3] == stream[-4] == stream[-5] and stream[-1] != stream[-2]:
+        restore_val = stream[-2]
+        if restore_val == val1:
+            score1 += 35.0
+        else:
+            score2 += 35.0
+        patterns.append(f"{restore_val} 장줄 복원")
+
+    # 2. ⚡ 퐁당 꺾기 감지
+    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1:
+            score1 += 35.0
+        else:
+            score2 += 35.0
+        patterns.append("퐁당 꺾기")
+
+    # 2.5 🛡️ 퐁당 1개 튐 복원
+    elif n >= 5 and stream[-2] != stream[-3] and stream[-3] != stream[-4] and stream[-4] != stream[-5] and stream[-1] == stream[-2]:
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1:
+            score1 += 30.0
+        else:
+            score2 += 30.0
+        patterns.append("퐁당 복원")
+
+    # 3. 📦 투박스(2-2) / 삼박스(3-3)
+    elif n >= 4 and stream[-1] == stream[-2] and stream[-3] == stream[-4] and stream[-1] != stream[-3]:
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1:
+            score1 += 25.0
+        else:
+            score2 += 25.0
+        patterns.append("투박스 꺾기")
+
+    # 흐름 가중치 기본 점수
+    recent_count = Counter(stream[-5:])
+    score1 += recent_count[val1] * 2.0
+    score2 += recent_count[val2] * 2.0
+
+    if score1 >= score2:
+        rec_val = val1
+        top_score = score1
+    else:
+        rec_val = val2
+        top_score = score2
+
+    prob = 55.0 + min(top_score * 0.6, 32.0)
+    pat_str = patterns[0] if patterns else "일반 흐름"
+
+    return rec_val, prob, pat_str
+
+# 메인 예측 분석 함수 (완전 독립 3원화)
 def analyze_prediction(records):
     target_records = records[-MAX_DATA_SIZE:]
-    results = [r['result'] for r in target_records]
-    n = len(results)
-    if n < 4:
+    if len(target_records) < 4:
         return None
 
-    scores = {'우사': 0.0, '우삼': 0.0, '좌사': 0.0, '좌삼': 0.0}
-    active_patterns = []
+    s_stream = [ITEM_MAP[r['result']][0] for r in target_records]
+    l_stream = [ITEM_MAP[r['result']][1] for r in target_records]
+    o_stream = [ITEM_MAP[r['result']][2] for r in target_records]
 
-    # 1. 🔥 순수 장줄 구간 (가중치 +40)
-    if results[-1] == results[-2] == results[-3]:
-        if n >= 6 and results[-4] == results[-5] == results[-6] and results[-1] != results[-4]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            scores[opp_item] += 35.0
-            active_patterns.append("삼박스 완료(꺾기)")
-        else:
-            last_item = results[-1]
-            scores[last_item] += 40.0
-            active_patterns.append("장줄(줄타기)")
-
-    # 1.5 🛡️ 장줄 1개 튐 노이즈 복원 (가중치 +35)
-    if n >= 5 and results[-2] == results[-3] == results[-4] == results[-5] and results[-1] != results[-2]:
-        restore_item = results[-2]
-        scores[restore_item] += 35.0
-        active_patterns.append("장줄 1개 튐 복원")
-
-    # 2. ⚡ 순수 퐁당 구간 (가중치 +35)
-    if results[-1] != results[-2] and results[-2] != results[-3]:
-        opp_item = OPPOSITE_MAP[results[-1]]
-        scores[opp_item] += 35.0
-        active_patterns.append("퐁당(꺾기)")
-
-    # 2.5 🛡️ 퐁당 1개 튐 노이즈 복원 (가중치 +30)
-    if n >= 5 and results[-2] != results[-3] and results[-3] != results[-4] and results[-4] != results[-5] and results[-1] == results[-2]:
-        opp_item = OPPOSITE_MAP[results[-1]]
-        scores[opp_item] += 30.0
-        active_patterns.append("퐁당 1개 튐 복원")
-
-    # 3. 📦 삼박스(3-3) 진행 구간 (가중치 +25)
-    if n >= 5 and results[-4] == results[-5] == results[-3] and results[-1] == results[-2] and results[-1] != results[-3]:
-        same_item = results[-1]
-        scores[same_item] += 25.0
-        active_patterns.append("삼박스 진행")
-
-    # 3.5 📦 투박스(2-2) 구간 (가중치 +25)
-    if n >= 4:
-        if results[-3] == results[-4] and results[-1] == results[-2] and results[-1] != results[-3]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            scores[opp_item] += 25.0
-            active_patterns.append("투박스 완료(꺾기)")
-        elif results[-2] == results[-3] and results[-1] != results[-2]:
-            same_item = results[-1]
-            scores[same_item] += 25.0
-            active_patterns.append("투박스 진행")
-
-    # 4. 🪞 데칼(대칭) 패턴 (가중치 +20)
-    if n >= 5:
-        if results[-1] == results[-2] and results[-3] == results[-4] and results[-1] != results[-3]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            scores[opp_item] += 20.0
-            active_patterns.append("데칼 완료")
-        elif results[-1] == results[-2] and results[-1] != results[-3]:
-            opp_item = OPPOSITE_MAP[results[-1]]
-            scores[opp_item] += 18.0
-            active_patterns.append("데칼(1-2-1)")
-
-    best_item = max(scores, key=scores.get)
-    best_score = scores[best_item]
-
-    if best_score == 0.0:
-        return None
-
-    # 출발, 줄수, 홀짝 가중치 개별 집계
-    score_s = {'우': 0.0, '좌': 0.0}
-    score_l = {'사': 0.0, '삼': 0.0}
-    score_o = {'홀': 0.0, '짝': 0.0}
-
-    for item, sc in scores.items():
-        s_val, l_val, o_val = ITEM_MAP[item]
-        score_s[s_val] += sc
-        score_l[l_val] += sc
-        score_o[o_val] += sc
-
-    rec_s = '우' if score_s['우'] >= score_s['좌'] else '좌'
-    rec_l = '사' if score_l['사'] >= score_l['삼'] else '삼'
-    rec_o = '짝' if score_o['짝'] >= score_o['홀'] else '홀'
-
-    # 개별 점수에 상응하는 독립 확률 계산 (각각 개별 연산)
-    prob_s = 55.0 + min(score_s[rec_s] * 0.75, 30.0)
-    prob_l = 55.0 + min(score_l[rec_l] * 0.75, 30.0)
-    prob_o = 55.0 + min(score_o[rec_o] * 0.75, 30.0)
+    rec_s, prob_s, pat_s = analyze_single_stream(s_stream, '우', '좌')
+    rec_l, prob_l, pat_l = analyze_single_stream(l_stream, '사', '삼')
+    rec_o, prob_o, pat_o = analyze_single_stream(o_stream, '짝', '홀')
 
     indicators = [
-        ('출발', rec_s, prob_s),
-        ('줄수', rec_l, prob_l),
-        ('홀짝', rec_o, prob_o)
+        ('출발', rec_s, prob_s, pat_s),
+        ('줄수', rec_l, prob_l, pat_l),
+        ('홀짝', rec_o, prob_o, pat_o)
     ]
     indicators.sort(key=lambda x: x[2], reverse=True)
     top1, top2 = indicators[0], indicators[1]
 
     top_combination_str = f"{top1[1]} + {top2[1]} ({top1[0]}+{top2[0]})"
-
-    pat_summary = " + ".join(active_patterns)
-    status_text = f"🎯 순수 패턴 감지 [{pat_summary}] (점수: {best_score:.1f}점)"
+    status_text = f"🎯 독립 패턴 감지 [출발:{pat_s} | 줄수:{pat_l} | 홀짝:{pat_o}]"
 
     return {
-        'rec_s': rec_s, 'prob_s': prob_s,
-        'rec_l': rec_l, 'prob_l': prob_l,
-        'rec_o': rec_o, 'prob_o': prob_o,
+        'rec_s': rec_s, 'prob_s': prob_s, 'pat_s': pat_s,
+        'rec_l': rec_l, 'prob_l': prob_l, 'pat_l': pat_l,
+        'rec_o': rec_o, 'prob_o': prob_o, 'pat_o': pat_o,
         'top1': top1, 'top2': top2,
         'top_combination': top_combination_str,
         'status': status_text
@@ -398,7 +380,9 @@ else:
         st.markdown(f"**구간 : {curr_pred['status']}**")
         st.markdown("---")
         st.markdown(f"**이번회차예측 ( {next_round}회차 )**")
-        st.markdown(f"출발 : **{curr_pred['rec_s']}** `{curr_pred['prob_s']:.1f}%` | 줄수 : **{curr_pred['rec_l']}** `{curr_pred['prob_l']:.1f}%` | 홀짝 : **{curr_pred['rec_o']}** `{curr_pred['prob_o']:.1f}%`")
+        st.markdown(f"출발 : **{curr_pred['rec_s']}** `{curr_pred['prob_s']:.1f}%` ({curr_pred['pat_s']})")
+        st.markdown(f"줄수 : **{curr_pred['rec_l']}** `{curr_pred['prob_l']:.1f}%` ({curr_pred['pat_l']})")
+        st.markdown(f"홀짝 : **{curr_pred['rec_o']}** `{curr_pred['prob_o']:.1f}%` ({curr_pred['pat_o']})")
         st.markdown(f"🔥 **추천 상위 2개 조합 : [{curr_pred['top_combination']}]**")
     else:
         st.markdown("**구간 : 분석 데이터 부족**")
