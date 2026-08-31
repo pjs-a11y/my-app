@@ -83,11 +83,9 @@ def analyze_prediction(records):
 # 메인 UI 화면
 st.title("📊 키노사다리 정밀 분석기")
 
-records = load_data()
-
-# 세션 상태 초기화
-if "records" not in st_session_state:
-    st.session_state.records = records
+# 세션 상태 초기화 (오류 수정 부분)
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
 
 records = st.session_state.records
 
@@ -97,6 +95,7 @@ if not records:
     init_date = st.date_input("날짜 선택", datetime.now())
     init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
     
+    st.write("첫 회차 결과 선택:")
     col1, col2, col3, col4 = st.columns(4)
     btn_us = col1.button("우사")
     btn_um = col2.button("우삼")
@@ -174,7 +173,7 @@ else:
         st.session_state.records.append({
             'date': curr_date,
             'round': next_round,
-            'result': "우사" # 임시 보정 처리 로직
+            'result': "우사"
         })
         st.toast(f"{next_round}회차를 건너뛰었습니다.")
         st.rerun()
