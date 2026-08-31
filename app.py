@@ -143,10 +143,10 @@ if not records:
     st.write("첫 회차 결과 선택:")
     col1, col2, col3, col4 = st.columns(4)
     sel = None
-    if col1.button("우사"): sel = "우사"
-    elif col2.button("우삼"): sel = "우삼"
-    elif col3.button("좌사"): sel = "좌사"
-    elif col4.button("좌삼"): sel = "좌삼"
+    if col1.button("우삼"): sel = "우삼"
+    elif col2.button("우사"): sel = "우사"
+    elif col3.button("좌삼"): sel = "좌삼"
+    elif col4.button("좌사"): sel = "좌사"
 
     if sel:
         push_backup()
@@ -158,7 +158,6 @@ if not records:
         save_data(st.session_state.records)
         st.rerun()
 
-    # 데이터가 없을 때도 되돌리기 버튼 제공
     if st.session_state.history_stack:
         st.markdown("---")
         if st.button("↩️ 이전 상태로 되돌리기", use_container_width=True):
@@ -301,12 +300,19 @@ else:
 
     st.markdown("---")
 
-    # 세부 결과 표
+    # 세부 결과 표 (오늘 날짜의 최신 회차순 정렬)
     st.markdown("**세부 결과**")
     if len(records) >= 5:
         rows = []
         n_rec = len(records)
-        for i in range(max(4, n_rec-10), n_rec):
+        
+        # 전체 데이터 중 '오늘 날짜(curr_date)' 데이터 인덱스만 필터링
+        today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
+        
+        # 오늘 데이터가 존재하면 최신 인덱스부터 역순으로 조회
+        for i in reversed(today_indices):
+            if i < 4:
+                continue
             p_sub = records[:i]
             pr = analyze_prediction(p_sub)
             act_item = records[i]['result']
@@ -329,7 +335,9 @@ else:
                 })
         
         if rows:
-            df = pd.DataFrame(rows[::-1])
+            df = pd.DataFrame(rows)
             st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.markdown("오늘 입력된 세부 예측 결과가 없습니다.")
     else:
         st.markdown("기록 축적 중...")
