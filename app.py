@@ -52,6 +52,48 @@ def save_log(date, rd, rec_s, rec_l, actual):
     except Exception:
         pass
 
+def calculate_stats(records):
+    """과거 예측 적중률 계산 (4회차 이후부터 예측이 생성되므로 그 이후 적중여부 집계)"""
+    n = len(records)
+    if n < 5:
+        return None
+    
+    total_preds = 0
+    combo_wins = 0 # 조합(우사, 좌삼 등) 적중
+    dir_wins = 0   # 방향(우/좌) 적중
+    
+    for i in range(4, n):
+        past_sub = records[:i]
+        pred = analyze_prediction(past_sub)
+        if pred:
+            actual = records[i]['result']
+            rec_s, _, rec_l, _, _ = pred
+            
+            # 예측값과 실제값 비교
+            pred_combo = f"{rec_s}{rec_l}"
+            act_s = ITEM_MAP[actual][0]
+            
+            total_preds += 1
+            if pred_combo == actual:
+                combo_wins += 1
+            if rec_s == act_s:
+                dir_wins += 1
+                
+    if total_preds == 0:
+        return None
+        
+    combo_rate = (combo_wins / total_preds) * 100.0
+    dir_rate = (dir_wins / total_preds) * 100.0
+    
+    return {
+        'total': total_preds,
+        'combo_wins': combo_wins,
+        'combo_loses': total_preds - combo_wins,
+        'combo_rate': combo_rate,
+        'dir_wins': dir_wins,
+        'dir_rate': dir_rate
+    }
+
 def analyze_prediction(records):
     results = [r['result'] for r in records]
     n = len(results)
@@ -126,17 +168,29 @@ else:
 
     st.info(f"📅 **날짜:** {curr_date} | 🔢 **다음 입력 회차:** {next_round}회차")
 
+    # 실시간 승률 통계 계산 및 표시
+    stats = calculate_stats(records)
+    if stats:
+        st.markdown("### 🏆 누적 예측 적중 성적 (승률)")
+        sc1, sc2, sc3 = st.columns(3)
+        sc1.metric("조합 승률", f"{stats['combo_rate']:.1f}%", f"{stats['combo_wins']}승 {stats['combo_loses']}패")
+        sc2.metric("방향 승률(우/좌)", f"{stats['dir_rate']:.1f}%", f"{stats['dir_wins']}회 적중")
+        sc3.metric("총 예측 횟수", f"{stats['total']}회")
+        st.markdown("---")
+
     # 예측 엔진 구동
     pred_res = analyze_prediction(records)
     
     # 예측 결과 대시보드
     if pred_res:
         rec_s, s_p, rec_l, l_p, p_name = pred_res
-        st.markdown("### 💡 이번 회차 예측")
+        st.markdown("### 💡 이번 회차 추천 예측")
         col_a, col_b, col_c = st.columns(3)
-        col_a.metric("추천 방향", rec_s, f"{s_p:.1f}%")
-        col_b.metric("추천 줄수", rec_l, f"{l_p:.1f}%")
+        col_a.metric("추천 방향", rec_s, f"{s_p:.1f}% 패턴확률")
+        col_b.metric("추천 줄수", rec_l, f"{l_p:.1f}% 패턴확률")
         col_c.metric("조합", f"{rec_s}{rec_l}", ITEM_MAP[rec_s+rec_l][2])
+    else:
+        st.warning("⚠️ 승률 분석 및 다음 예측을 위해 데이터를 4회차 이상 입력해 주세요.")
 
     st.markdown("---")
     st.markdown("### 🎯 결과 빠른 입력 (버튼 터치)")
@@ -170,13 +224,13 @@ else:
     st.markdown("---")
     col_undo, col_skip, col_reset = st.columns(3)
     
-    if col_undo.button("↩️ 마지막 입력 취소", use_container_width=True):
+    if col_undo.button("↩️ 입력 취소", use_container_width=True):
         popped = st.session_state.records.pop()
         save_data(st.session_state.records)
         st.toast(f"{popped['round']}회차 ({popped['result']}) 입력을 취소했습니다.")
         st.rerun()
 
-    if col_skip.button("⏩ 회차 건너뛰기", use_container_width=True):
+    if col_skip.button("⏩ 패스", use_container_width=True):
         st.session_state.records.append({
             'date': curr_date,
             'round': next_round,
