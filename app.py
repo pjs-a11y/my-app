@@ -433,7 +433,7 @@ else:
 
     st.markdown("---")
 
-    # 6. 당일 세부 결과 전체 표출 (단독/상위 패스 완벽 반영)
+    # 6. 당일 세부 결과 전체 표출 (패스 회차 완전 숨김)
     st.markdown("**오늘 세부 결과 (A/B 결과 적중 리스트)**")
     if len(records) >= 5:
         rows = []
@@ -447,37 +447,37 @@ else:
             act_item = records[i]['result']
             rd_num = records[i]['round']
             
+            # 입력된 실제 결과가 PASS인 경우 숨김
             if act_item == "PASS":
-                rows.append({"회차": f"{rd_num}회", "실제 결과": "패스", "A 결과": "-", "A 적중": "-", "B 결과": "-", "B 적중": "-"})
-            else:
-                act_full = ITEM_FULL_MAP[act_item]
-                is_p_row, p_msg = check_ab_overall_pass(res_a_prev, res_b_prev)
+                continue
                 
-                # A 적중 판정
-                if is_p_row or res_a_prev == "패스":
-                    a_match = "패스 (통계제외)"
-                elif res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
-                    a_match = "적중 🎯"
-                else:
-                    a_match = "미적중"
+            act_full = ITEM_FULL_MAP[act_item]
+            is_p_row, _ = check_ab_overall_pass(res_a_prev, res_b_prev)
+            
+            # A 결과 또는 B 결과가 패스이거나 상위 자동패스인 회차는 표에서 완전히 제외
+            if is_p_row or res_a_prev == "패스" or res_b_prev == "패스":
+                continue
 
-                # B 적중 판정
-                if is_p_row or res_b_prev == "패스":
-                    b_match = "패스 (통계제외)"
-                elif res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
-                    b_match = "적중 🎯"
-                else:
-                    b_match = "미적중"
+            # 승패 판정 (패스가 아닌 실제 적중/미적중 건만 표에 등록)
+            a_match = "미적중"
+            if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
+                a_match = "적중 🎯"
 
-                rows.append({
-                    "회차": f"{rd_num}회",
-                    "실제 결과": f"{act_item} ({act_full})",
-                    "A 결과": res_a_prev,
-                    "A 적중": a_match,
-                    "B 결과": res_b_prev,
-                    "B 적중": b_match
-                })
+            b_match = "미적중"
+            if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
+                b_match = "적중 🎯"
+
+            rows.append({
+                "회차": f"{rd_num}회",
+                "실제 결과": f"{act_item} ({act_full})",
+                "A 결과": res_a_prev,
+                "A 적중": a_match,
+                "B 결과": res_b_prev,
+                "B 적중": b_match
+            })
         
         if rows:
             df = pd.DataFrame(rows)
             st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.markdown("오늘 유효한 적중/미적중 회차가 없습니다.")
