@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 역발상 꼬기 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 순차적 꼬기 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,65 +62,68 @@ def save_data(records):
     except Exception:
         pass
 
-# 💥 역발상 꼬기(Inverse) 패턴 스캔 엔진
-def calculate_stream_pattern_score(stream, val1, val2):
+# 💥 지정된 꼬기 규칙 (장줄 끊기 / 퐁당 전회차동일 / 투박 계단)
+def calculate_twisted_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
         return {val1: 50.0, val2: 50.0}
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 🔥 장줄 구간 ➔ 무조건 '끊기(반대)'로 꼬기
+    # 1. 🔥 장줄 구간 ➔ 무조건 끊기 (반대 속성 가산점)
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         opp_val = val2 if rec == val1 else val1
-        if opp_val == val1: score1 += 30.0
-        else: score2 += 30.0
+        if opp_val == val1: score1 += 32.0
+        else: score2 += 32.0
 
-    # 2. ⚡ 퐁당 구간 ➔ '투박스(2연속 동일)'로 꼬기
+    # 2. ⚡ 퐁당 구간 ➔ 전회차 같은 것 (복사) 가산점
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
-        same_val = stream[-1]  # 퐁당을 끊고 동일 속성이 나오도록 지정
+        same_val = stream[-1]
         if same_val == val1: score1 += 28.0
         else: score2 += 28.0
 
-    # 3. 📦 투박스 구간 ➔ '퐁당(즉시 꺾임)'으로 꼬기
+    # 3. 📦 투박 구간 ➔ 계단식 (1-2-3 유도) 가산점
     elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        opp_val = val2 if stream[-1] == val1 else val1  # 투박스 완성을 방지하고 꺾기
-        if opp_val == val1: score1 += 25.0
-        else: score2 += 25.0
-
-    # 4. 📶 계단/대칭 구간 ➔ 대칭 파괴 속성에 가산점
-    elif n >= 6:
-        if stream[-1] == stream[-2] and stream[-2] != stream[-3]:
-            opp_val = val2 if stream[-1] == val1 else val1
-            if opp_val == val1: score1 += 20.0
-            else: score2 += 20.0
+        # 투박스 유지가 아닌 3줄 계단 확장을 노리는 방향으로 반대 가산점
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1: score1 += 26.0
+        else: score2 += 26.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 역발상 합성 엔진
+# 🛠️ 순차적 알고리즘 파이프라인 (Sequential Pipeline)
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
 
+    # [1단계] 출발, 줄수 스트림 스캔
     s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
     l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
+
+    s_scores = calculate_twisted_score(s_stream, '우', '좌')
+    l_scores = calculate_twisted_score(l_stream, '사', '삼')
+
+    # [2단계] 조건부 홀짝 스트림 스캔
     o_stream = [ITEM_MAP[r['result']][2] for r in valid_records]
+    o_scores = calculate_twisted_score(o_stream, '짝', '홀')
 
-    s_scores = calculate_stream_pattern_score(s_stream, '우', '좌')
-    l_scores = calculate_stream_pattern_score(l_stream, '사', '삼')
-    o_scores = calculate_stream_pattern_score(o_stream, '짝', '홀')
-
+    # [3단계] 순차적 가중 파이프라인 합성
     combo_probs = {}
     for combo in ALL_COMBOS:
         s_val, l_val, o_val = ITEM_MAP[combo]
+        
         p_s = s_scores[s_val] / 100.0
         p_l = l_scores[l_val] / 100.0
         p_o = o_scores[o_val] / 100.0
         
-        combo_probs[combo] = p_s * p_l * p_o
+        # 1단계(출발x줄수) 상위 조건에 통과된 경로에 2단계(홀짝) 가중치를 순차 결합
+        stage1_prob = p_s * p_l
+        final_stage_prob = stage1_prob * (p_o ** 1.2)  # 순차 가중 파이프라인 적용
+        
+        combo_probs[combo] = final_stage_prob
 
     # 4조합 정규화 (총합 100%)
     tot_p = sum(combo_probs.values())
@@ -324,7 +327,7 @@ else:
     # 5. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 역발상 통분석 ( {next_round}회차 )**")
+        st.markdown(f"**이번회차 순차적 꼬기 통분석 ( {next_round}회차 )**")
         st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
         st.markdown(f"🎯 추천 조합 (역발상 지울 픽 2순위) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
@@ -342,7 +345,7 @@ else:
     input_val = None
     if b_um: input_val = "우삼"
     elif b_us: input_val = "우사"
-    elif b_jm: input_val = "좌삼"
+    elif b_jm: input_val = "좌사"
     elif b_js: input_val = "좌사"
 
     if input_val:
