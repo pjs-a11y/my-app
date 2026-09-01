@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 A/B 패턴 및 지우기 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 A/B 패턴 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -65,10 +65,9 @@ def save_data(records):
 # 🅰️ [A 엔진: 장줄 & 퐁당 중심 연산]
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
-    if n < 3: return {val1: 50.0, val2: 50.0}
+    if n < 2: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 1. 장줄 스캔
     if stream[-1] == stream[-2]:
         rec = stream[-1]
         streak = 2
@@ -79,7 +78,6 @@ def calculate_score_A_engine(stream, val1, val2):
         if rec == val1: s1 += bonus
         else: s2 += bonus
 
-    # 2. 퐁당 스캔
     if stream[-1] != stream[-2]:
         streak = 2
         for idx in range(3, min(n + 1, 10)):
@@ -122,7 +120,6 @@ def calculate_score_B_engine(stream, val1, val2):
     if n < 4: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 1. 투박스/삼박스
     if stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         same_val = stream[-1]
         if same_val == val1: s1 += 22.0
@@ -132,13 +129,11 @@ def calculate_score_B_engine(stream, val1, val2):
         if opp_val == val1: s1 += 25.0
         else: s2 += 25.0
 
-    # 2. 계단형
     if n >= 6 and stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4]:
         same_val = stream[-1]
         if same_val == val1: s1 += 20.0
         else: s2 += 20.0
 
-    # 3. 데칼코마니
     if n >= 6 and stream[-1] == stream[-5] and stream[-2] == stream[-4]:
         sym_val = stream[-3]
         if sym_val == val1: s1 += 24.0
@@ -170,7 +165,7 @@ def analyze_B_engine(records):
         'all_probs': norm_probs
     }
 
-# 통계 계산 함수 (추천 적중률 + 지울 픽 성공률 통합 집계)
+# 통계 계산 함수
 def calculate_ab_stats(records, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records[-limit_recent:]
     else: eval_records = records
@@ -180,7 +175,7 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
 
     tot_a, tot_b = 0, 0
     a_win, b_win = 0, 0
-    a_avoid_win, b_avoid_win = 0, 0  # 안 나온 조합 지우기 성공 횟수
+    a_avoid_win, b_avoid_win = 0, 0
 
     for i in range(3, n):
         act = eval_records[i]['result']
@@ -195,12 +190,12 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
         if res_a:
             tot_a += 1
             if res_a['top'] == act: a_win += 1
-            if res_a['worst'] != act: a_avoid_win += 1  # 지울 픽이 안 나왔으면 성공
+            if res_a['worst'] != act: a_avoid_win += 1
 
         if res_b:
             tot_b += 1
             if res_b['top'] == act: b_win += 1
-            if res_b['worst'] != act: b_avoid_win += 1  # 지울 픽이 안 나왔으면 성공
+            if res_b['worst'] != act: b_avoid_win += 1
 
     return {
         'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
