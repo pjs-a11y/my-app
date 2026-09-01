@@ -83,14 +83,11 @@ def check_ab_overall_pass(res_a, res_b):
     if res_a == "패스" or res_b == "패스":
         return True, "패스 (내부 3개 동일)"
     
-    # A와 B의 추출 속성을 리스트화
     attrs_a = res_a.split('/') if res_a not in ["대칭 (없음)", "분석중"] else []
     attrs_b = res_b.split('/') if res_b not in ["대칭 (없음)", "분석중"] else []
 
-    # 공통 속성 계산
     common = set(attrs_a).intersection(set(attrs_b))
     
-    # 두 결과 중 하나라도 조합(3개속성)에 해당하거나 공통속성이 3개면 전체 패스
     if len(common) >= 3 or len(attrs_a) == 3 or len(attrs_b) == 3:
         if set(attrs_a) == set(attrs_b) and len(attrs_a) == 3:
             return True, "패스 (A/B 공통 3개 일치)"
@@ -206,7 +203,7 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
         res_b = analyze_B_engine(past_sub)
 
         is_pass, _ = check_ab_overall_pass(res_a, res_b)
-        if is_pass: continue  # 3개속성 패스 회차 통계 제외
+        if is_pass: continue
 
         if res_a not in ["패스", "대칭 (없음)", "분석중"]:
             tot_a += 1
@@ -355,11 +352,15 @@ else:
                 st.markdown(f"🚫 **회차 결과 : {p_reason} ➔ 통계 제외**")
             else:
                 a_ok = "미적중"
-                if prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
+                if prev_a_res == "패스":
+                    a_ok = "패스 (통계 제외)"
+                elif prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
                     a_ok = "적중 🎯"
 
                 b_ok = "미적중"
-                if prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
+                if prev_b_res == "패스":
+                    b_ok = "패스 (통계 제외)"
+                elif prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
                     b_ok = "적중 🎯"
 
                 st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
@@ -432,7 +433,7 @@ else:
 
     st.markdown("---")
 
-    # 6. 당일 세부 결과 전체 표출
+    # 6. 당일 세부 결과 전체 표출 (단독/상위 패스 완벽 반영)
     st.markdown("**오늘 세부 결과 (A/B 결과 적중 리스트)**")
     if len(records) >= 5:
         rows = []
@@ -452,32 +453,30 @@ else:
                 act_full = ITEM_FULL_MAP[act_item]
                 is_p_row, p_msg = check_ab_overall_pass(res_a_prev, res_b_prev)
                 
-                if is_p_row:
-                    rows.append({
-                        "회차": f"{rd_num}회",
-                        "실제 결과": f"{act_item} ({act_full})",
-                        "A 결과": res_a_prev,
-                        "A 적중": "패스 (통계제외)",
-                        "B 결과": res_b_prev,
-                        "B 적중": "패스 (통계제외)"
-                    })
+                # A 적중 판정
+                if is_p_row or res_a_prev == "패스":
+                    a_match = "패스 (통계제외)"
+                elif res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
+                    a_match = "적중 🎯"
                 else:
                     a_match = "미적중"
-                    if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
-                        a_match = "적중 🎯"
 
+                # B 적중 판정
+                if is_p_row or res_b_prev == "패스":
+                    b_match = "패스 (통계제외)"
+                elif res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
+                    b_match = "적중 🎯"
+                else:
                     b_match = "미적중"
-                    if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
-                        b_match = "적중 🎯"
 
-                    rows.append({
-                        "회차": f"{rd_num}회",
-                        "실제 결과": f"{act_item} ({act_full})",
-                        "A 결과": res_a_prev,
-                        "A 적중": a_match,
-                        "B 결과": res_b_prev,
-                        "B 적중": b_match
-                    })
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": f"{act_item} ({act_full})",
+                    "A 결과": res_a_prev,
+                    "A 적중": a_match,
+                    "B 결과": res_b_prev,
+                    "B 적중": b_match
+                })
         
         if rows:
             df = pd.DataFrame(rows)
