@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 20% 적중률 강화 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 역발상 꼬기 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 단독 적중률 20~21% 강화 스캔 엔진 (역행 가중치 18.0~22.0)
+# 💥 역발상 꼬기(Inverse) 패턴 스캔 엔진
 def calculate_stream_pattern_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -70,29 +70,36 @@ def calculate_stream_pattern_score(stream, val1, val2):
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 🔥 장줄 변곡점 역행 스캔 (가중치 강화)
+    # 1. 🔥 장줄 구간 ➔ 무조건 '끊기(반대)'로 꼬기
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         opp_val = val2 if rec == val1 else val1
-        if opp_val == val1: score1 += 22.0
-        else: score2 += 22.0
+        if opp_val == val1: score1 += 30.0
+        else: score2 += 30.0
 
-    # 2. ⚡ 퐁당 변곡점 스캔
+    # 2. ⚡ 퐁당 구간 ➔ '투박스(2연속 동일)'로 꼬기
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
-        same_val = stream[-1]
-        if same_val == val1: score1 += 20.0
-        else: score2 += 20.0
+        same_val = stream[-1]  # 퐁당을 끊고 동일 속성이 나오도록 지정
+        if same_val == val1: score1 += 28.0
+        else: score2 += 28.0
 
-    # 3. 📦 투박스 / 계단 지점 역행 보정
+    # 3. 📦 투박스 구간 ➔ '퐁당(즉시 꺾임)'으로 꼬기
     elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: score1 += 18.0
-        else: score2 += 18.0
+        opp_val = val2 if stream[-1] == val1 else val1  # 투박스 완성을 방지하고 꺾기
+        if opp_val == val1: score1 += 25.0
+        else: score2 += 25.0
+
+    # 4. 📶 계단/대칭 구간 ➔ 대칭 파괴 속성에 가산점
+    elif n >= 6:
+        if stream[-1] == stream[-2] and stream[-2] != stream[-3]:
+            opp_val = val2 if stream[-1] == val1 else val1
+            if opp_val == val1: score1 += 20.0
+            else: score2 += 20.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 합성 분석 엔진
+# 3구멍 역발상 합성 엔진
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
@@ -317,7 +324,7 @@ else:
     # 5. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 통분석 ( {next_round}회차 )**")
+        st.markdown(f"**이번회차 역발상 통분석 ( {next_round}회차 )**")
         st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
         st.markdown(f"🎯 추천 조합 (역발상 지울 픽 2순위) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
