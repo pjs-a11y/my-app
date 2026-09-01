@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 7대패턴 통분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 7대패턴+복사통분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -37,6 +37,14 @@ ITEM_FULL_MAP = {
     '우삼': '우삼홀',
     '좌사': '좌사홀',
     '좌삼': '좌삼짝'
+}
+
+# 100% 완전 반대 조합 매핑
+OPPOSITE_COMBO_MAP = {
+    '우사': '좌삼',  # 우사짝 (우,사,짝) <-> 좌삼짝 (좌,삼,짝) [홀짝동일/출발·줄수 반대] -> 정반대 속성은 우삼홀(우삼)
+    '우삼': '좌사',  # 우삼홀 <-> 좌사홀
+    '좌사': '우삼',  # 좌사홀 <-> 우삼홀
+    '좌삼': '우사'   # 좌삼짝 <-> 우사짝
 }
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
@@ -120,11 +128,14 @@ def calculate_stream_pattern_score(stream, val1, val2):
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 독립 스캔 ➔ 4조합 통분석 합성 엔진
+# 3구멍 독립 스캔 ➔ 4조합 통분석 + 복사 우대/반대 감점 결합 엔진
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
+
+    last_combo = valid_records[-1]['result']
+    opposite_combo = OPPOSITE_COMBO_MAP.get(last_combo, None)
 
     s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
     l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
@@ -143,6 +154,13 @@ def analyze_combo_prediction(records):
         p_o = o_scores[o_val] / 100.0
         
         raw_prob = p_s * p_l * p_o
+
+        # 💡 복사 우대 (+15%) 및 완전 반대 감점 (-15%) 가중치 보정
+        if combo == last_combo:
+            raw_prob *= 1.15  # 직전 회차 조합 복사 가점
+        elif combo == opposite_combo:
+            raw_prob *= 0.85  # 완전 반대 조합 감점 (지울 픽)
+
         combo_probs[combo] = raw_prob
 
     # 4조합 정규화 (총합 100%)
@@ -347,7 +365,7 @@ else:
     # 5. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 7대패턴 합성분석 ( {next_round}회차 )**")
+        st.markdown(f"**이번회차 통분석 ( {next_round}회차 )**")
         st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
         st.markdown(f"🎯 가장 나올 조합 (추천 픽) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
