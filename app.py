@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 20% 적중률 조율 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 20% 적중률 강화 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 단독 적중률 20~21% 타겟 스캔 엔진 (패턴 역행 가중치 반영)
+# 단독 적중률 20~21% 강화 스캔 엔진 (역행 가중치 18.0~22.0)
 def calculate_stream_pattern_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -70,31 +70,29 @@ def calculate_stream_pattern_score(stream, val1, val2):
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 🔥 장줄 변곡점 역행 스캔 (적중률 20%선 유지용)
+    # 1. 🔥 장줄 변곡점 역행 스캔 (가중치 강화)
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         opp_val = val2 if rec == val1 else val1
-        # 연속 출현 시 꺾임(역행)에 우선 가산점
-        if opp_val == val1: score1 += 18.0
-        else: score2 += 18.0
+        if opp_val == val1: score1 += 22.0
+        else: score2 += 22.0
 
     # 2. ⚡ 퐁당 변곡점 스캔
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
         same_val = stream[-1]
-        # 퐁당 지속 시 줄타기(역행)에 우선 가산점
-        if same_val == val1: score1 += 16.0
-        else: score2 += 16.0
+        if same_val == val1: score1 += 20.0
+        else: score2 += 20.0
 
     # 3. 📦 투박스 / 계단 지점 역행 보정
     elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: score1 += 14.0
-        else: score2 += 14.0
+        if opp_val == val1: score1 += 18.0
+        else: score2 += 18.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 합성 분석 엔진 (단독 적중률 20~21% 조율)
+# 3구멍 합성 분석 엔진
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
