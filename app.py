@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 공통 속성(교집합) 추출 함수
+# 공통 속성(교집합) 추출 함수 (3개 일치 시 패스 표출)
 def extract_common_attributes(combo1, combo2):
     s1, l1, o1 = ITEM_MAP[combo1]
     s2, l2, o2 = ITEM_MAP[combo2]
@@ -72,7 +72,10 @@ def extract_common_attributes(combo1, combo2):
     if l1 == l2: commons.append(l1)
     if o1 == o2: commons.append(o1)
     
-    if commons:
+    # 🎯 3개 속성이 모두 같으면 '패스' 텍스트 표출
+    if len(commons) == 3:
+        return "패스"
+    elif len(commons) > 0:
         return "/".join(commons)
     return "대칭 (없음)"
 
@@ -184,14 +187,14 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
         res_a = analyze_A_engine(past_sub)
         res_b = analyze_B_engine(past_sub)
 
-        if res_a != "대칭 (없음)" and res_a != "분석중":
+        # '패스', '대칭 (없음)', '분석중'이 아닌 경우만 적중률 통계 집계
+        if res_a not in ["패스", "대칭 (없음)", "분석중"]:
             tot_a += 1
-            # 슬래시(/) 분할 속성 대응
             sub_attrs = res_a.split('/')
             if any(attr in act_full for attr in sub_attrs):
                 a_win += 1
 
-        if res_b != "대칭 (없음)" and res_b != "분석중":
+        if res_b not in ["패스", "대칭 (없음)", "분석중"]:
             tot_b += 1
             sub_attrs = res_b.split('/')
             if any(attr in act_full for attr in sub_attrs):
@@ -275,7 +278,7 @@ else:
 
     # 1. 전체 누적 통계
     all_stat = calculate_ab_stats(records)
-    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    st.markdown("**전체 누적 통계 (패스/대칭 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A 결과 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B 결과 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
@@ -287,7 +290,7 @@ else:
     # 2. 최근 3000개 누적 통계
     recent_stat = calculate_ab_stats(records, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스/대칭 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A 결과 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B 결과 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
@@ -326,13 +329,19 @@ else:
         else:
             act_full = ITEM_FULL_MAP[prev_actual]
             
-            a_ok = "미적중"
-            if prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
+            if prev_a_res == "패스":
+                a_ok = "패스 (통계 제외)"
+            elif prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
                 a_ok = "적중 🎯"
+            else:
+                a_ok = "미적중"
 
-            b_ok = "미적중"
-            if prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
+            if prev_b_res == "패스":
+                b_ok = "패스 (통계 제외)"
+            elif prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
                 b_ok = "적중 🎯"
+            else:
+                b_ok = "미적중"
 
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             st.markdown(f"🅰️ **A 결과 ({prev_a_res})** ➔ **{a_ok}**")
@@ -419,13 +428,19 @@ else:
             else:
                 act_full = ITEM_FULL_MAP[act_item]
                 
-                a_match = "미적중"
-                if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
+                if res_a_prev == "패스":
+                    a_match = "패스 (통계 제외)"
+                elif res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
                     a_match = "적중 🎯"
+                else:
+                    a_match = "미적중"
 
-                b_match = "미적중"
-                if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
+                if res_b_prev == "패스":
+                    b_match = "패스 (통계 제외)"
+                elif res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
                     b_match = "적중 🎯"
+                else:
+                    b_match = "미적중"
 
                 rows.append({
                     "회차": f"{rd_num}회",
