@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 단독 추천 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 A/B 듀얼 추천 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 🟢 표준 7대 패턴 순수 확률 스캔 엔진
+# 🅰️ [방식 A] 3구멍 독립 스캔 엔진
 def calculate_standard_pattern_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -70,7 +70,6 @@ def calculate_standard_pattern_score(stream, val1, val2):
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 장줄 패턴 (동일 속성 지속)
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         streak = 3
@@ -81,7 +80,6 @@ def calculate_standard_pattern_score(stream, val1, val2):
         if rec == val1: score1 += bonus
         else: score2 += bonus
 
-    # 2. 퐁당 패턴 (연속 꺾임 지속)
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
         streak = 3
         for idx in range(4, min(n + 1, 10)):
@@ -92,31 +90,17 @@ def calculate_standard_pattern_score(stream, val1, val2):
         if opp_val == val1: score1 += bonus
         else: score2 += bonus
 
-    # 3. 투박스(2-2) / 삼박스(3-3) 진행 패턴
     elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         same_val = stream[-1]
         if same_val == val1: score1 += 18.0
         else: score2 += 18.0
-    elif n >= 5 and stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: score1 += 20.0
-        else: score2 += 20.0
-
-    # 4. 계단 및 대칭 패턴
-    elif n >= 6:
-        if stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4] and stream[-4] != stream[-5]:
-            same_val = stream[-1]
-            if same_val == val1: score1 += 16.0
-            else: score2 += 16.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 합성 분석 엔진 (단독 1위 추천 전용)
-def analyze_combo_prediction(records):
+def analyze_method_A(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
-    if len(valid_records) < 4:
-        return None
+    if len(valid_records) < 4: return None
 
     s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
     s_scores = calculate_standard_pattern_score(s_stream, '우', '좌')
@@ -137,70 +121,87 @@ def analyze_combo_prediction(records):
 
     tot_p = sum(combo_probs.values())
     final_probs = {c: (p / tot_p) * 100.0 for c, p in combo_probs.items()}
-
     sorted_combos = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
 
-    top_rec = sorted_combos[0][0]  # 단독 1위 추천
+    return sorted_combos[0][0], sorted_combos[0][1]
 
-    return {
-        'top_rec': top_rec,
-        'top_full': ITEM_FULL_MAP[top_rec],
-        'top_prob': sorted_combos[0][1],
-        'worst': sorted_combos[-1][0],
-        'all_probs': final_probs
-    }
+# 🅱️ [방식 B] 3원화 없이 조합 통분석 엔진
+def analyze_method_B(records):
+    valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
+    if len(valid_records) < 4: return None
 
-# 단독 추천 적중 승률 계산 함수
+    combo_stream = [r['result'] for r in valid_records]
+    n = len(combo_stream)
+
+    scores = {c: 25.0 for c in ALL_COMBOS}
+
+    # 1. 조합 직접 연속성 (장줄)
+    if combo_stream[-1] == combo_stream[-2]:
+        scores[combo_stream[-1]] += 20.0
+
+    # 2. 조합 교차 패턴 (퐁당)
+    elif combo_stream[-1] != combo_stream[-2] and combo_stream[-2] == combo_stream[-3]:
+        scores[combo_stream[-1]] += 15.0
+
+    # 3. 출현 주기(미출현 갭) 가산점
+    last_seen = {}
+    for c in ALL_COMBOS:
+        last_seen[c] = 999
+    for idx, c in enumerate(reversed(combo_stream)):
+        if last_seen[c] == 999:
+            last_seen[c] = idx
+
+    for c in ALL_COMBOS:
+        if 2 <= last_seen[c] <= 5:
+            scores[c] += 10.0
+
+    tot_p = sum(scores.values())
+    final_probs = {c: (p / tot_p) * 100.0 for c, p in scores.items()}
+    sorted_combos = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
+
+    return sorted_combos[0][0], sorted_combos[0][1]
+
+# 통계 집계 함수
 def calculate_combo_stats(records, target_date=None, limit_recent=None):
-    if limit_recent:
-        eval_records = records[-limit_recent:]
-    else:
-        eval_records = records
+    if limit_recent: eval_records = records[-limit_recent:]
+    else: eval_records = records
 
     n = len(eval_records)
-    if n < 5:
-        return None
+    if n < 5: return None
 
     tot_count = 0
-    rec_win = 0
+    a_win, b_win = 0, 0
 
     for i in range(4, n):
         act = eval_records[i]['result']
-        if act not in ALL_COMBOS:
-            continue
-
-        if target_date and eval_records[i]['date'] != target_date:
-            continue
+        if act not in ALL_COMBOS: continue
+        if target_date and eval_records[i]['date'] != target_date: continue
 
         past_sub = eval_records[:i]
-        pred = analyze_combo_prediction(past_sub)
-        if pred:
-            tot_count += 1
-            if pred['top_rec'] == act:
-                rec_win += 1
+        p_a = analyze_method_A(past_sub)
+        p_b = analyze_method_B(past_sub)
 
-    if tot_count == 0:
-        return None
+        if p_a and p_b:
+            tot_count += 1
+            if p_a[0] == act: a_win += 1
+            if p_b[0] == act: b_win += 1
+
+    if tot_count == 0: return None
 
     return {
         'total': tot_count,
-        'win': rec_win,
-        'lose': tot_count - rec_win,
-        'rate': (rec_win / tot_count) * 100.0
+        'a_win': a_win, 'a_rate': (a_win / tot_count) * 100.0,
+        'b_win': b_win, 'b_rate': (b_win / tot_count) * 100.0
     }
 
 # 백업 상태 관리
-if "records" not in st.session_state:
-    st.session_state.records = load_data()
-if "history_stack" not in st.session_state:
-    st.session_state.history_stack = []
-if "show_bulk" not in st.session_state:
-    st.session_state.show_bulk = False
+if "records" not in st.session_state: st.session_state.records = load_data()
+if "history_stack" not in st.session_state: st.session_state.history_stack = []
+if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
 def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
-    if len(st.session_state.history_stack) > 10:
-        st.session_state.history_stack.pop(0)
+    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
 records = st.session_state.records
 
@@ -264,67 +265,25 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 승률
+    # 통계 표출
     all_stat = calculate_combo_stats(records)
-    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    st.markdown("**전체 누적 통계 (A/B 방식 비교)**")
     if all_stat:
-        st.markdown(f"🎯 **단독 추천 조합 적중률 : {all_stat['win']}승 {all_stat['lose']}패 (승률 {all_stat['rate']:.1f}%)**")
+        st.markdown(f"🅰️ **[현재] 3원화 분석 적중률 : {all_stat['a_win']}승 (승률 {all_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **[신규] 조합통합 분석 적중률 : {all_stat['b_win']}승 (승률 {all_stat['b_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    # 2. 최근 3000개 누적 승률
-    recent_stat = calculate_combo_stats(records, limit_recent=MAX_DATA_SIZE)
-    recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
-    if recent_stat:
-        st.markdown(f"🎯 **단독 추천 조합 적중률 : {recent_stat['win']}승 {recent_stat['lose']}패 (승률 {recent_stat['rate']:.1f}%)**")
-    else:
-        st.markdown("데이터 축적 중...")
+    # 이번회차 듀얼 추천 표출
+    res_a = analyze_method_A(records)
+    res_b = analyze_method_B(records)
 
-    st.markdown("---")
-
-    # 3. 오늘 누적 승률
-    try:
-        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
-        w_str = WEEKDAYS[dt_obj.weekday()]
-    except Exception:
-        w_str = ""
-
-    today_stat = calculate_combo_stats(records, target_date=curr_date)
-    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
-    if today_stat:
-        st.markdown(f"🎯 **단독 추천 조합 적중률 : {today_stat['win']}승 {today_stat['lose']}패 (승률 {today_stat['rate']:.1f}%)**")
-    else:
-        st.markdown("데이터 축적 중...")
-
-    st.markdown("---")
-
-    # 4. 직전 회차 결과
-    if len(records) >= 5:
-        prev_sub = records[:-1]
-        prev_pred = analyze_combo_prediction(prev_sub)
-        prev_actual = last_rec['result']
-        
-        st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
-        if prev_actual == "PASS":
-            st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
-        elif prev_pred:
-            r_res = "성공 🎯" if prev_pred['top_rec'] == prev_actual else "실패"
-            
-            st.markdown(f"실제 결과 : **{prev_actual} ({ITEM_FULL_MAP[prev_actual]})**")
-            st.markdown(f"🎯 추천 조합 적중 : **{prev_pred['top_rec']}** ➔ **{r_res}**")
-        else:
-            st.markdown(f"실제 결과 : **{prev_actual}**")
-
-    st.markdown("---")
-
-    # 5. 이번회차 단독 추천 조합 표출
-    curr_pred = analyze_combo_prediction(records)
-    if curr_pred:
-        st.markdown(f"**이번회차 표준 분석 추천 ( {next_round}회차 )**")
-        st.markdown(f"🎯 **단독 추천 조합 : {curr_pred['top_rec']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
+    if res_a and res_b:
+        st.markdown(f"**이번회차 A/B 듀얼 추천 ( {next_round}회차 )**")
+        st.markdown(f"🅰️ **[A: 현재 3원화 추천] : {res_a[0]} ({ITEM_FULL_MAP[res_a[0]]})** `확률 {res_a[1]:.1f}%`")
+        st.markdown(f"🅱️ **[B: 조합통합 추천] : {res_b[0]} ({ITEM_FULL_MAP[res_b[0]]})** `확률 {res_b[1]:.1f}%`")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -377,40 +336,3 @@ else:
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
             st.rerun()
-
-    st.markdown("---")
-
-    # 세부 결과 표 (당일 최신순)
-    st.markdown("**세부 결과 (단독 추천 적중 여부)**")
-    if len(records) >= 5:
-        rows = []
-        today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
-        
-        for i in reversed(today_indices):
-            if i < 4:
-                continue
-            p_sub = records[:i]
-            pr = analyze_combo_prediction(p_sub)
-            act_item = records[i]['result']
-            rd_num = records[i]['round']
-            
-            if act_item == "PASS":
-                rows.append({
-                    "회차": f"{rd_num}회",
-                    "실제 결과": "패스 (PASS)",
-                    "추천 조합": "-",
-                    "적중 여부": "통계 제외"
-                })
-            elif pr:
-                r_ok = "성공 🎯" if pr['top_rec'] == act_item else "실패"
-                
-                rows.append({
-                    "회차": f"{rd_num}회",
-                    "실제 결과": f"{act_item} ({ITEM_FULL_MAP[act_item]})",
-                    "추천 조합": f"{pr['top_rec']} ({pr['top_full']})",
-                    "적중 여부": r_ok
-                })
-        
-        if rows:
-            df = pd.DataFrame(rows)
-            st.dataframe(df, hide_index=True, use_container_width=True)
