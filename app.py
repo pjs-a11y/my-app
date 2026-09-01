@@ -65,9 +65,7 @@ def analyze_combo_prediction(records):
     n = len(combos)
 
     # 조합별 최근 출현 위치(간격) 계산
-    last_seen = {}
-    for c in ALL_COMBOS:
-        last_seen[c] = 999
+    last_seen = {c: 999 for c in ALL_COMBOS}
     for idx, c in enumerate(reversed(combos)):
         if last_seen[c] == 999:
             last_seen[c] = idx
@@ -98,24 +96,28 @@ def analyze_combo_prediction(records):
         opp_c = combos[-1]
         scores[opp_c] += 15.0
 
-    # 최장 미출현 조합 점수 감점 (안 나올 조합 우대)
+    # 최장 미출현 조합 감점 (안 나올 조합 확률 증가)
     for c in ALL_COMBOS:
         if last_seen[c] >= 10:
-            scores[c] -= 15.0  # 오랫동안 안 나온 조합은 감점
+            scores[c] -= 15.0
 
     sorted_combos = sorted(scores.items(), key=lambda x: x[1], reverse=True)
     
-    top_recommend = sorted_combos[0][0]  # 가장 나올 확률 높은 조합
-    worst_avoid = sorted_combos[-1][0]   # 가장 안 나올 확률 높은 조합
+    # 점수 정규화 ➔ 확률(%) 계산
+    total_score = sum(s[1] for s in sorted_combos)
+    prob_dict = {c: (score / total_score) * 100.0 for c, score in sorted_combos}
+
+    top_recommend = sorted_combos[0][0]  # 가장 나올 조합
+    worst_avoid = sorted_combos[-1][0]   # 가장 안 나올 조합
 
     return {
         'top_recommend': top_recommend,
         'top_full': ITEM_FULL_MAP[top_recommend],
-        'top_score': sorted_combos[0][1],
+        'top_prob': prob_dict[top_recommend],
         'worst_avoid': worst_avoid,
         'worst_full': ITEM_FULL_MAP[worst_avoid],
-        'worst_score': sorted_combos[-1][1],
-        'all_scores': sorted_combos
+        'worst_prob': prob_dict[worst_avoid],  # 안 나올 확률 (%)
+        'all_probs': prob_dict
     }
 
 # 통계 계산
@@ -131,7 +133,7 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
 
     tot_count = 0
     hit_win = 0
-    avoid_win = 0  # 지운 픽이 진짜 안 나와서 성공한 횟수
+    avoid_win = 0  # 안 나올 조합(지운 픽)이 실제로 안 나와서 적중한 횟수
 
     for i in range(4, n):
         act = eval_records[i]['result']
@@ -148,7 +150,7 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
             if pred['top_recommend'] == act:
                 hit_win += 1
             if pred['worst_avoid'] != act:
-                avoid_win += 1  # 안 나온다고 한 게 진짜 안 나옴
+                avoid_win += 1  # 지운 픽 적중 성공
 
     if tot_count == 0:
         return None
@@ -156,8 +158,10 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
     return {
         'total': tot_count,
         'hit_win': hit_win,
+        'hit_lose': tot_count - hit_win,
         'hit_rate': (hit_win / tot_count) * 100.0,
         'avoid_win': avoid_win,
+        'avoid_lose': tot_count - avoid_win,
         'avoid_rate': (avoid_win / tot_count) * 100.0
     }
 
@@ -236,22 +240,60 @@ else:
 
     st.markdown("---")
 
-    # 통계 표출 (지운 픽 성공률 중심)
-    recent_stat = calculate_combo_stats(records, limit_recent=MAX_DATA_SIZE)
-    recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 통계 (4조합 통분석)**")
-    if recent_stat:
-        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {recent_stat['avoid_win']}회 성공 / 승률 {recent_stat['avoid_rate']:.1f}%**")
-        st.markdown(f"🎯 단독 추천 조합 적중률 : {recent_stat['hit_win']}회 성공 / 승률 {recent_stat['hit_rate']:.1f}%")
+    # 1. 전체 누적 승률
+    all_stat = calculate_combo_stats(records)
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    if all_stat:
+        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {all_stat['avoid_win']}승 {all_stat['avoid_lose']}패 (승률 {all_stat['avoid_rate']:.1f}%)**")
+        st.markdown(f"🎯 단독 추천 조합 적중률 : {all_stat['hit_win']}승 {all_stat['hit_lose']}패 (승률 {all_stat['hit_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    # 이번회차 4조합 분석 표출
+    # 2. 오늘 누적 승률
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
+
+    today_stat = calculate_combo_stats(records, target_date=curr_date)
+    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
+    if today_stat:
+        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (승률 {today_stat['avoid_rate']:.1f}%)**")
+        st.markdown(f"🎯 단독 추천 조합 적중률 : {today_stat['hit_win']}승 {today_stat['hit_lose']}패 (승률 {today_stat['hit_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 3. 직전 회차 결과
+    if len(records) >= 5:
+        prev_sub = records[:-1]
+        prev_pred = analyze_combo_prediction(prev_sub)
+        prev_actual = last_rec['result']
+        
+        st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
+        if prev_actual == "PASS":
+            st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
+        elif prev_pred:
+            avoid_res = "성공 (안 나옴)" if prev_pred['worst_avoid'] != prev_actual else "실패 (나와버림)"
+            hit_res = "성공" if prev_pred['top_recommend'] == prev_actual else "실패"
+            st.markdown(f"실제 결과 : **{prev_actual} ({ITEM_FULL_MAP[prev_actual]})**")
+            st.markdown(f"⚠️ 안 나올 조합 지우기 : **{prev_pred['worst_avoid']}** ➔ **{avoid_res}**")
+            st.markdown(f"🎯 단독 추천 조합 적중 : **{prev_pred['top_recommend']}** ➔ **{hit_res}**")
+        else:
+            st.markdown(f"실제 결과 : **{prev_actual}**")
+
+    st.markdown("---")
+
+    # 4. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
         st.markdown(f"**이번회차 4조합 통분석 ( {next_round}회차 )**")
-        st.markdown(f"⚠️ **절대 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})**")
-        st.markdown(f"🎯 가장 나올 조합 (추천 픽) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})**")
+        st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
+        st.markdown(f"🎯 가장 나올 조합 (추천 픽) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -307,7 +349,7 @@ else:
 
     st.markdown("---")
 
-    # 세부 결과 표
+    # 세부 결과 표 (당일 최신순)
     st.markdown("**세부 결과 (지운 픽 적중 여부)**")
     if len(records) >= 5:
         rows = []
