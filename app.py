@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 완전독립 꼬기 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 지울픽 1·2순위 듀얼 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 💥 단일 트랙 전용 꼬기(Inverse) 스캔 엔진 (독립 적용)
+# 단일 트랙 독립 꼬기 스캔 엔진
 def calculate_single_track_twisted_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -70,20 +70,20 @@ def calculate_single_track_twisted_score(stream, val1, val2):
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 🔥 장줄 구간 ➔ 무조건 끊기 (반대 속성 가산점)
+    # 1. 장줄 구간 ➔ 끊기 (반대 속성 가점)
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         opp_val = val2 if rec == val1 else val1
         if opp_val == val1: score1 += 32.0
         else: score2 += 32.0
 
-    # 2. ⚡ 퐁당 구간 ➔ 전회차 같은 것 (복사) 가산점
+    # 2. 퐁당 구간 ➔ 전회차 동일 (복사) 가점
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
         same_val = stream[-1]
         if same_val == val1: score1 += 28.0
         else: score2 += 28.0
 
-    # 3. 📦 투박 구간 ➔ 계단식 (1-2-3 유도) 가산점
+    # 3. 투박 구간 ➔ 계단식 (1-2-3 유도) 가점
     elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         opp_val = val2 if stream[-1] == val1 else val1
         if opp_val == val1: score1 += 26.0
@@ -92,56 +92,53 @@ def calculate_single_track_twisted_score(stream, val1, val2):
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# ⚡ 3구멍 완전히 독립적인 스캔 및 4조합 합성 엔진
+# 3구멍 독립 스캔 및 4조합 확률 도출 (1위~4위 전체 정렬)
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
 
-    # [독립 트랙 1] 출발 스트림
     s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
     s_scores = calculate_single_track_twisted_score(s_stream, '우', '좌')
 
-    # [독립 트랙 2] 줄수 스트림
     l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
     l_scores = calculate_single_track_twisted_score(l_stream, '사', '삼')
 
-    # [독립 트랙 3] 홀짝 스트림
     o_stream = [ITEM_MAP[r['result']][2] for r in valid_records]
     o_scores = calculate_single_track_twisted_score(o_stream, '짝', '홀')
 
-    # 3개 완전 독립 트랙 확률 곱연산 결합
     combo_probs = {}
     for combo in ALL_COMBOS:
         s_val, l_val, o_val = ITEM_MAP[combo]
-        
         p_s = s_scores[s_val] / 100.0
         p_l = l_scores[l_val] / 100.0
         p_o = o_scores[o_val] / 100.0
-        
-        # 완전 독립 확률 합성 (종속성 없음)
         combo_probs[combo] = p_s * p_l * p_o
 
-    # 4조합 정규화 (총합 100%)
     tot_p = sum(combo_probs.values())
     final_probs = {c: (p / tot_p) * 100.0 for c, p in combo_probs.items()}
 
     sorted_combos = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
 
-    top_recommend = sorted_combos[0][0]
-    worst_avoid = sorted_combos[-1][0]
+    # 4위: 지울 픽 1순위 (가장 확률 낮음)
+    worst1 = sorted_combos[-1][0]
+    # 3위: 지울 픽 2순위 (두 번째로 확률 낮음)
+    worst2 = sorted_combos[-2][0]
 
     return {
-        'top_recommend': top_recommend,
-        'top_full': ITEM_FULL_MAP[top_recommend],
+        'worst1_avoid': worst1,
+        'worst1_full': ITEM_FULL_MAP[worst1],
+        'worst1_prob': sorted_combos[-1][1],
+        'worst2_avoid': worst2,
+        'worst2_full': ITEM_FULL_MAP[worst2],
+        'worst2_prob': sorted_combos[-2][1],
+        'top_recommend': sorted_combos[0][0],
+        'top_full': ITEM_FULL_MAP[sorted_combos[0][0]],
         'top_prob': sorted_combos[0][1],
-        'worst_avoid': worst_avoid,
-        'worst_full': ITEM_FULL_MAP[worst_avoid],
-        'worst_prob': sorted_combos[-1][1],
         'all_probs': final_probs
     }
 
-# 통계 계산 최적화 함수
+# 지우기 1순위, 2순위 및 동시 지우기 승률 집계 함수
 def calculate_combo_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
         eval_records = records[-limit_recent:]
@@ -153,8 +150,9 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
         return None
 
     tot_count = 0
-    hit_win = 0
-    avoid_win = 0
+    avoid1_win = 0
+    avoid2_win = 0
+    dual_avoid_win = 0  # 1순위와 2순위 둘 다 안 나온 경우 (2개 동시에 잘 지움)
 
     for i in range(4, n):
         act = eval_records[i]['result']
@@ -168,22 +166,24 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
         pred = analyze_combo_prediction(past_sub)
         if pred:
             tot_count += 1
-            if pred['top_recommend'] == act:
-                hit_win += 1
-            if pred['worst_avoid'] != act:
-                avoid_win += 1
+            if pred['worst1_avoid'] != act:
+                avoid1_win += 1
+            if pred['worst2_avoid'] != act:
+                avoid2_win += 1
+            if pred['worst1_avoid'] != act and pred['worst2_avoid'] != act:
+                dual_avoid_win += 1
 
     if tot_count == 0:
         return None
 
     return {
         'total': tot_count,
-        'hit_win': hit_win,
-        'hit_lose': tot_count - hit_win,
-        'hit_rate': (hit_win / tot_count) * 100.0,
-        'avoid_win': avoid_win,
-        'avoid_lose': tot_count - avoid_win,
-        'avoid_rate': (avoid_win / tot_count) * 100.0
+        'avoid1_win': avoid1_win,
+        'avoid1_rate': (avoid1_win / tot_count) * 100.0,
+        'avoid2_win': avoid2_win,
+        'avoid2_rate': (avoid2_win / tot_count) * 100.0,
+        'dual_avoid_win': dual_avoid_win,
+        'dual_avoid_rate': (dual_avoid_win / tot_count) * 100.0
     }
 
 # 백업 상태 관리
@@ -265,8 +265,9 @@ else:
     all_stat = calculate_combo_stats(records)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
-        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {all_stat['avoid_win']}승 {all_stat['avoid_lose']}패 (승률 {all_stat['avoid_rate']:.1f}%)**")
-        st.markdown(f"🎯 단독 추천 조합 적중률 : {all_stat['hit_win']}승 {all_stat['hit_lose']}패 (승률 {all_stat['hit_rate']:.1f}%)")
+        st.markdown(f"⚠️ **지울 픽 1순위 성공률 : {all_stat['avoid1_win']}승 / {all_stat['total']}회 (승률 {all_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⚠️ **지울 픽 2순위 성공률 : {all_stat['avoid2_win']}승 / {all_stat['total']}회 (승률 {all_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **1·2순위 동시 지우기 성공률 : {all_stat['dual_avoid_win']}승 / {all_stat['total']}회 (승률 {all_stat['dual_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -277,8 +278,9 @@ else:
     recent_cnt = min(len(records), MAX_DATA_SIZE)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
     if recent_stat:
-        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (승률 {recent_stat['avoid_rate']:.1f}%)**")
-        st.markdown(f"🎯 단독 추천 조합 적중률 : {recent_stat['hit_win']}승 {recent_stat['hit_lose']}패 (승률 {recent_stat['hit_rate']:.1f}%)")
+        st.markdown(f"⚠️ **지울 픽 1순위 성공률 : {recent_stat['avoid1_win']}승 / {recent_stat['total']}회 (승률 {recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⚠️ **지울 픽 2순위 성공률 : {recent_stat['avoid2_win']}승 / {recent_stat['total']}회 (승률 {recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **1·2순위 동시 지우기 성공률 : {recent_stat['dual_avoid_win']}승 / {recent_stat['total']}회 (승률 {recent_stat['dual_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -294,8 +296,9 @@ else:
     today_stat = calculate_combo_stats(records, target_date=curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (승률 {today_stat['avoid_rate']:.1f}%)**")
-        st.markdown(f"🎯 단독 추천 조합 적중률 : {today_stat['hit_win']}승 {today_stat['hit_lose']}패 (승률 {today_stat['hit_rate']:.1f}%)")
+        st.markdown(f"⚠️ **지울 픽 1순위 성공률 : {today_stat['avoid1_win']}승 / {today_stat['total']}회 (승률 {today_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⚠️ **지울 픽 2순위 성공률 : {today_stat['avoid2_win']}승 / {today_stat['total']}회 (승률 {today_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **1·2순위 동시 지우기 성공률 : {today_stat['dual_avoid_win']}승 / {today_stat['total']}회 (승률 {today_stat['dual_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -311,22 +314,23 @@ else:
         if prev_actual == "PASS":
             st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
         elif prev_pred:
-            avoid_res = "성공 (안 나옴)" if prev_pred['worst_avoid'] != prev_actual else "실패 (나와버림)"
-            hit_res = "성공" if prev_pred['top_recommend'] == prev_actual else "실패"
+            a1_res = "성공" if prev_pred['worst1_avoid'] != prev_actual else "실패"
+            a2_res = "성공" if prev_pred['worst2_avoid'] != prev_actual else "실패"
+            
             st.markdown(f"실제 결과 : **{prev_actual} ({ITEM_FULL_MAP[prev_actual]})**")
-            st.markdown(f"⚠️ 안 나올 조합 지우기 : **{prev_pred['worst_avoid']}** ➔ **{avoid_res}**")
-            st.markdown(f"🎯 단독 추천 조합 적중 : **{prev_pred['top_recommend']}** ➔ **{hit_res}**")
+            st.markdown(f"⚠️ 지울 픽 1순위 : **{prev_pred['worst1_avoid']}** ➔ **{a1_res}**")
+            st.markdown(f"⚠️ 지울 픽 2순위 : **{prev_pred['worst2_avoid']}** ➔ **{a2_res}**")
         else:
             st.markdown(f"실제 결과 : **{prev_actual}**")
 
     st.markdown("---")
 
-    # 5. 이번회차 안 나올 확률 & 예측 표출
+    # 5. 이번회차 안 나올 확률 & 지울 픽 1·2순위 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 완전독립 꼬기 통분석 ( {next_round}회차 )**")
-        st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
-        st.markdown(f"🎯 추천 조합 (역발상 지울 픽 2순위) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
+        st.markdown(f"**이번회차 통분석 ( {next_round}회차 )**")
+        st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst1_avoid']} ({curr_pred['worst1_full']})** `출현확률 {curr_pred['worst1_prob']:.1f}%`")
+        st.markdown(f"⚠️ **두 번째 안 나올 조합 (지울 픽 2순위) : {curr_pred['worst2_avoid']} ({curr_pred['worst2_full']})** `출현확률 {curr_pred['worst2_prob']:.1f}%`")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -400,16 +404,21 @@ else:
                 rows.append({
                     "회차": f"{rd_num}회",
                     "실제 결과": "패스 (PASS)",
-                    "지운 픽 (안 나올 조합)": "-",
+                    "지울 픽 1순위": "-",
+                    "지울 픽 2순위": "-",
                     "지우기 성공 여부": "통계 제외"
                 })
             elif pr:
-                avoid_ok = "성공 (안 나옴)" if pr['worst_avoid'] != act_item else "실패 (나와버림)"
+                a1_ok = "성공" if pr['worst1_avoid'] != act_item else "실패"
+                a2_ok = "성공" if pr['worst2_avoid'] != act_item else "실패"
+                dual_ok = "2개 모두 성공" if (pr['worst1_avoid'] != act_item and pr['worst2_avoid'] != act_item) else "1개 이상 나와버림"
+                
                 rows.append({
                     "회차": f"{rd_num}회",
                     "실제 결과": f"{act_item} ({ITEM_FULL_MAP[act_item]})",
-                    "지운 픽 (안 나올 조합)": f"{pr['worst_avoid']} ({pr['worst_full']})",
-                    "지우기 성공 여부": avoid_ok
+                    "지울 픽 1순위": f"{pr['worst1_avoid']} ({pr['worst1_full']})",
+                    "지울 픽 2순위": f"{pr['worst2_avoid']} ({pr['worst2_full']})",
+                    "동시 지우기 성공": dual_ok
                 })
         
         if rows:
