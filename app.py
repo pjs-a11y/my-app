@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 지울픽 1·2순위 듀얼 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 전회차 양상 추종 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,50 +62,50 @@ def save_data(records):
     except Exception:
         pass
 
-# 단일 트랙 독립 꼬기 스캔 엔진
-def calculate_single_track_twisted_score(stream, val1, val2):
+# 단일 트랙용 전회차 양상(SAME/DIFF) 추종 스캔 엔진
+def calculate_trend_follow_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
         return {val1: 50.0, val2: 50.0}
 
     score1, score2 = 50.0, 50.0
+    
+    # 직전 양상 확인 (직전 2개가 같았는가, 달랐는가)
+    last_val = stream[-1]
+    is_same = (stream[-1] == stream[-2])
 
-    # 1. 장줄 구간 ➔ 끊기 (반대 속성 가점)
-    if stream[-1] == stream[-2] == stream[-3]:
-        rec = stream[-1]
-        opp_val = val2 if rec == val1 else val1
-        if opp_val == val1: score1 += 32.0
-        else: score2 += 32.0
-
-    # 2. 퐁당 구간 ➔ 전회차 동일 (복사) 가점
-    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
-        same_val = stream[-1]
-        if same_val == val1: score1 += 28.0
+    # 1. 직전이 '같은 속성(SAME)'으로 나왔다면 ➔ 이번에도 '같은 속성' 추종 가점
+    if is_same:
+        if last_val == val1: score1 += 28.0
+        else: score2 += 28.0
+    # 2. 직전이 '다른 속성(DIFF)'으로 나왔다면 ➔ 이번에도 '다른 속성(꺾임)' 추종 가점
+    else:
+        opp_val = val2 if last_val == val1 else val1
+        if opp_val == val1: score1 += 28.0
         else: score2 += 28.0
 
-    # 3. 투박 구간 ➔ 계단식 (1-2-3 유도) 가점
-    elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: score1 += 26.0
-        else: score2 += 26.0
+    # 장줄 보정 (3연속 이상 지속 시 추종 가중치 추가 강화)
+    if n >= 4 and stream[-1] == stream[-2] == stream[-3]:
+        if last_val == val1: score1 += 12.0
+        else: score2 += 12.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 3구멍 독립 스캔 및 4조합 확률 도출 (1위~4위 전체 정렬)
+# 3구멍 독립 스캔 및 전회차 추종 4조합 분석 엔진
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
 
     s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
-    s_scores = calculate_single_track_twisted_score(s_stream, '우', '좌')
+    s_scores = calculate_trend_follow_score(s_stream, '우', '좌')
 
     l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
-    l_scores = calculate_single_track_twisted_score(l_stream, '사', '삼')
+    l_scores = calculate_trend_follow_score(l_stream, '사', '삼')
 
     o_stream = [ITEM_MAP[r['result']][2] for r in valid_records]
-    o_scores = calculate_single_track_twisted_score(o_stream, '짝', '홀')
+    o_scores = calculate_trend_follow_score(o_stream, '짝', '홀')
 
     combo_probs = {}
     for combo in ALL_COMBOS:
@@ -120,9 +120,7 @@ def analyze_combo_prediction(records):
 
     sorted_combos = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
 
-    # 4위: 지울 픽 1순위 (가장 확률 낮음)
     worst1 = sorted_combos[-1][0]
-    # 3위: 지울 픽 2순위 (두 번째로 확률 낮음)
     worst2 = sorted_combos[-2][0]
 
     return {
@@ -138,7 +136,7 @@ def analyze_combo_prediction(records):
         'all_probs': final_probs
     }
 
-# 지우기 1순위, 2순위 및 동시 지우기 승률 집계 함수
+# 지우기 승률 집계 함수
 def calculate_combo_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
         eval_records = records[-limit_recent:]
@@ -152,7 +150,7 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
     tot_count = 0
     avoid1_win = 0
     avoid2_win = 0
-    dual_avoid_win = 0  # 1순위와 2순위 둘 다 안 나온 경우 (2개 동시에 잘 지움)
+    dual_avoid_win = 0
 
     for i in range(4, n):
         act = eval_records[i]['result']
@@ -325,10 +323,10 @@ else:
 
     st.markdown("---")
 
-    # 5. 이번회차 안 나올 확률 & 지울 픽 1·2순위 표출
+    # 5. 이번회차 안 나올 확률 & 양상 추종 분석 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 통분석 ( {next_round}회차 )**")
+        st.markdown(f"**이번회차 전회차 양상 추종 통분석 ( {next_round}회차 )**")
         st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst1_avoid']} ({curr_pred['worst1_full']})** `출현확률 {curr_pred['worst1_prob']:.1f}%`")
         st.markdown(f"⚠️ **두 번째 안 나올 조합 (지울 픽 2순위) : {curr_pred['worst2_avoid']} ({curr_pred['worst2_full']})** `출현확률 {curr_pred['worst2_prob']:.1f}%`")
     else:
