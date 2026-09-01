@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 7대패턴 통분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 20% 적중률 조율 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 순수 7대 패턴 스캔 엔진 (단일 스트림용)
+# 단독 적중률 20~21% 타겟 스캔 엔진 (패턴 역행 가중치 반영)
 def calculate_stream_pattern_score(stream, val1, val2):
     n = len(stream)
     if n < 4:
@@ -70,57 +70,31 @@ def calculate_stream_pattern_score(stream, val1, val2):
 
     score1, score2 = 50.0, 50.0
 
-    # 1. 🔥 장줄 패턴 (3연속 이상)
+    # 1. 🔥 장줄 변곡점 역행 스캔 (적중률 20%선 유지용)
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
-        streak = 3
-        for idx in range(4, min(n + 1, 10)):
-            if stream[-idx] == rec:
-                streak += 1
-            else:
-                break
-        bonus = min(15.0 + (streak * 3.5), 35.0)
-        if rec == val1: score1 += bonus
-        else: score2 += bonus
-
-    # 2. ⚡ 퐁당 패턴 (연속 꺾임)
-    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
-        streak = 3
-        for idx in range(4, min(n + 1, 10)):
-            if stream[-idx + 1] != stream[-idx]:
-                streak += 1
-            else:
-                break
-        opp_val = val2 if stream[-1] == val1 else val1
-        bonus = min(12.0 + (streak * 2.5), 30.0)
-        if opp_val == val1: score1 += bonus
-        else: score2 += bonus
-
-    # 3. 📦 투박스(2-2) & 삼박스(3-3) 진행/완성 패턴
-    elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        same_val = stream[-1]
-        if same_val == val1: score1 += 18.0
+        opp_val = val2 if rec == val1 else val1
+        # 연속 출현 시 꺾임(역행)에 우선 가산점
+        if opp_val == val1: score1 += 18.0
         else: score2 += 18.0
-    elif n >= 5 and stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: score1 += 20.0
-        else: score2 += 20.0
 
-    # 4. 📶 계단 및 대칭 패턴 (123 / 321 / 데칼)
-    elif n >= 6:
-        if stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4] and stream[-4] != stream[-5]:
-            same_val = stream[-1]
-            if same_val == val1: score1 += 16.0
-            else: score2 += 16.0
-        elif stream[-1] == stream[-2] == stream[-3] and stream[-3] != stream[-4] and stream[-4] == stream[-5] and stream[-5] != stream[-6]:
-            opp_val = val2 if stream[-1] == val1 else val1
-            if opp_val == val1: score1 += 15.0
-            else: score2 += 15.0
+    # 2. ⚡ 퐁당 변곡점 스캔
+    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
+        same_val = stream[-1]
+        # 퐁당 지속 시 줄타기(역행)에 우선 가산점
+        if same_val == val1: score1 += 16.0
+        else: score2 += 16.0
+
+    # 3. 📦 투박스 / 계단 지점 역행 보정
+    elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1: score1 += 14.0
+        else: score2 += 14.0
 
     tot = score1 + score2
     return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
 
-# 순수 7대 패턴 합성 분석 엔진 (복사 가중치 제거)
+# 3구멍 합성 분석 엔진 (단독 적중률 20~21% 조율)
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
@@ -151,21 +125,14 @@ def analyze_combo_prediction(records):
 
     top_recommend = sorted_combos[0][0]
     worst_avoid = sorted_combos[-1][0]
-    
-    top_p = sorted_combos[0][1]
-    worst_p = sorted_combos[-1][1]
-
-    # 💡 노이즈 구간 판별 (1위와 4위 확률 차이가 10%p 미만이거나, 1위 확률이 30% 이하일 때)
-    is_noise = (top_p - worst_p < 10.0) or (top_p <= 30.0)
 
     return {
         'top_recommend': top_recommend,
         'top_full': ITEM_FULL_MAP[top_recommend],
-        'top_prob': top_p,
+        'top_prob': sorted_combos[0][1],
         'worst_avoid': worst_avoid,
         'worst_full': ITEM_FULL_MAP[worst_avoid],
-        'worst_prob': worst_p,
-        'is_noise': is_noise,
+        'worst_prob': sorted_combos[-1][1],
         'all_probs': final_probs
     }
 
@@ -349,18 +316,12 @@ else:
 
     st.markdown("---")
 
-    # 5. 이번회차 안 나올 확률 & 예측 표출 (노이즈 구간 알림 포함)
+    # 5. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
         st.markdown(f"**이번회차 통분석 ( {next_round}회차 )**")
-        
-        if curr_pred['is_noise']:
-            st.markdown("⚠️ **구간 상태 : 노이즈 구간 (확률이 팽팽하므로 패스 권장)**")
-        else:
-            st.markdown("🔥 **구간 상태 : 패턴 명확 (배팅 추천 구간)**")
-            
-        st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
-        st.markdown(f"🎯 가장 나올 조합 (추천 픽) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
+        st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽 1순위) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
+        st.markdown(f"🎯 추천 조합 (역발상 지울 픽 2순위) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
         st.markdown("데이터 축적 중...")
 
