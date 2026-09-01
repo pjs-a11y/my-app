@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 공통 속성(교집합) 추출 함수
+# 공통 속성(교집합) 추출 함수 (3개 일치 시 패스 표출)
 def extract_common_attributes(combo1, combo2):
     s1, l1, o1 = ITEM_MAP[combo1]
     s2, l2, o2 = ITEM_MAP[combo2]
@@ -72,9 +72,30 @@ def extract_common_attributes(combo1, combo2):
     if l1 == l2: commons.append(l1)
     if o1 == o2: commons.append(o1)
     
-    if commons:
+    if len(commons) == 3:
+        return "패스"
+    elif len(commons) > 0:
         return "/".join(commons)
     return "대칭 (없음)"
+
+# A/B 결과 간 상위 교집합 검사 (3개 속성 포함 여부 확인)
+def check_ab_overall_pass(res_a, res_b):
+    if res_a == "패스" or res_b == "패스":
+        return True, "패스 (내부 3개 동일)"
+    
+    # A와 B의 추출 속성을 리스트화
+    attrs_a = res_a.split('/') if res_a not in ["대칭 (없음)", "분석중"] else []
+    attrs_b = res_b.split('/') if res_b not in ["대칭 (없음)", "분석중"] else []
+
+    # 공통 속성 계산
+    common = set(attrs_a).intersection(set(attrs_b))
+    
+    # 두 결과 중 하나라도 조합(3개속성)에 해당하거나 공통속성이 3개면 전체 패스
+    if len(common) >= 3 or len(attrs_a) == 3 or len(attrs_b) == 3:
+        if set(attrs_a) == set(attrs_b) and len(attrs_a) == 3:
+            return True, "패스 (A/B 공통 3개 일치)"
+
+    return False, None
 
 # 🅰️ [A 엔진: 장줄 & 퐁당 중심]
 def calculate_score_A_3way(stream, val1, val2):
@@ -184,14 +205,16 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
         res_a = analyze_A_engine(past_sub)
         res_b = analyze_B_engine(past_sub)
 
-        if res_a != "대칭 (없음)" and res_a != "분석중":
+        is_pass, _ = check_ab_overall_pass(res_a, res_b)
+        if is_pass: continue  # 3개속성 패스 회차 통계 제외
+
+        if res_a not in ["패스", "대칭 (없음)", "분석중"]:
             tot_a += 1
-            # 슬래시(/) 분할 속성 대응
             sub_attrs = res_a.split('/')
             if any(attr in act_full for attr in sub_attrs):
                 a_win += 1
 
-        if res_b != "대칭 (없음)" and res_b != "분석중":
+        if res_b not in ["패스", "대칭 (없음)", "분석중"]:
             tot_b += 1
             sub_attrs = res_b.split('/')
             if any(attr in act_full for attr in sub_attrs):
@@ -275,7 +298,7 @@ else:
 
     # 1. 전체 누적 통계
     all_stat = calculate_ab_stats(records)
-    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    st.markdown("**전체 누적 통계 (패스/대칭 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A 결과 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B 결과 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
@@ -287,7 +310,7 @@ else:
     # 2. 최근 3000개 누적 통계
     recent_stat = calculate_ab_stats(records, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
-    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스/대칭 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A 결과 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B 결과 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
@@ -325,28 +348,37 @@ else:
             st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
         else:
             act_full = ITEM_FULL_MAP[prev_actual]
+            is_p, p_reason = check_ab_overall_pass(prev_a_res, prev_b_res)
             
-            a_ok = "미적중"
-            if prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
-                a_ok = "적중 🎯"
+            if is_p:
+                st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
+                st.markdown(f"🚫 **회차 결과 : {p_reason} ➔ 통계 제외**")
+            else:
+                a_ok = "미적중"
+                if prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
+                    a_ok = "적중 🎯"
 
-            b_ok = "미적중"
-            if prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
-                b_ok = "적중 🎯"
+                b_ok = "미적중"
+                if prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
+                    b_ok = "적중 🎯"
 
-            st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
-            st.markdown(f"🅰️ **A 결과 ({prev_a_res})** ➔ **{a_ok}**")
-            st.markdown(f"🅱️ **B 결과 ({prev_b_res})** ➔ **{b_ok}**")
+                st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
+                st.markdown(f"🅰️ **A 결과 ({prev_a_res})** ➔ **{a_ok}**")
+                st.markdown(f"🅱️ **B 결과 ({prev_b_res})** ➔ **{b_ok}**")
 
     st.markdown("---")
 
     # 5. 이번회차 A/B 결과 분석 표출
     curr_a_res = analyze_A_engine(records)
     curr_b_res = analyze_B_engine(records)
+    is_curr_pass, curr_pass_reason = check_ab_overall_pass(curr_a_res, curr_b_res)
 
     st.markdown(f"**이번회차 A/B 결과 분석 ( {next_round}회차 )**")
-    st.markdown(f"🅰️ **A 결과 : `{curr_a_res}`**")
-    st.markdown(f"🅱️ **B 결과 : `{curr_b_res}`**")
+    if is_curr_pass:
+        st.markdown(f"🚫 **{curr_pass_reason} ➔ 매수 금지 (패스 추천)**")
+    else:
+        st.markdown(f"🅰️ **A 결과 : `{curr_a_res}`**")
+        st.markdown(f"🅱️ **B 결과 : `{curr_b_res}`**")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -418,23 +450,34 @@ else:
                 rows.append({"회차": f"{rd_num}회", "실제 결과": "패스", "A 결과": "-", "A 적중": "-", "B 결과": "-", "B 적중": "-"})
             else:
                 act_full = ITEM_FULL_MAP[act_item]
+                is_p_row, p_msg = check_ab_overall_pass(res_a_prev, res_b_prev)
                 
-                a_match = "미적중"
-                if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
-                    a_match = "적중 🎯"
+                if is_p_row:
+                    rows.append({
+                        "회차": f"{rd_num}회",
+                        "실제 결과": f"{act_item} ({act_full})",
+                        "A 결과": res_a_prev,
+                        "A 적중": "패스 (통계제외)",
+                        "B 결과": res_b_prev,
+                        "B 적중": "패스 (통계제외)"
+                    })
+                else:
+                    a_match = "미적중"
+                    if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
+                        a_match = "적중 🎯"
 
-                b_match = "미적중"
-                if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
-                    b_match = "적중 🎯"
+                    b_match = "미적중"
+                    if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
+                        b_match = "적중 🎯"
 
-                rows.append({
-                    "회차": f"{rd_num}회",
-                    "실제 결과": f"{act_item} ({act_full})",
-                    "A 결과": res_a_prev,
-                    "A 적중": a_match,
-                    "B 결과": res_b_prev,
-                    "B 적중": b_match
-                })
+                    rows.append({
+                        "회차": f"{rd_num}회",
+                        "실제 결과": f"{act_item} ({act_full})",
+                        "A 결과": res_a_prev,
+                        "A 적중": a_match,
+                        "B 결과": res_b_prev,
+                        "B 적중": b_match
+                    })
         
         if rows:
             df = pd.DataFrame(rows)
