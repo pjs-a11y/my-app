@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 A/B 패턴 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 A/B 패턴 및 지우기 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -68,7 +68,7 @@ def calculate_score_A_engine(stream, val1, val2):
     if n < 3: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 1. 장줄 스캔 (동일 속성 연속)
+    # 1. 장줄 스캔
     if stream[-1] == stream[-2]:
         rec = stream[-1]
         streak = 2
@@ -79,7 +79,7 @@ def calculate_score_A_engine(stream, val1, val2):
         if rec == val1: s1 += bonus
         else: s2 += bonus
 
-    # 2. 퐁당 스캔 (1:1 교차)
+    # 2. 퐁당 스캔
     if stream[-1] != stream[-2]:
         streak = 2
         for idx in range(3, min(n + 1, 10)):
@@ -122,7 +122,7 @@ def calculate_score_B_engine(stream, val1, val2):
     if n < 4: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 1. 투박스(222) / 삼박스(333) 스캔
+    # 1. 투박스/삼박스
     if stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         same_val = stream[-1]
         if same_val == val1: s1 += 22.0
@@ -132,13 +132,13 @@ def calculate_score_B_engine(stream, val1, val2):
         if opp_val == val1: s1 += 25.0
         else: s2 += 25.0
 
-    # 2. 계단형(123/321) 스캔
+    # 2. 계단형
     if n >= 6 and stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4]:
         same_val = stream[-1]
         if same_val == val1: s1 += 20.0
         else: s2 += 20.0
 
-    # 3. 데칼코마니(대칭) 스캔
+    # 3. 데칼코마니
     if n >= 6 and stream[-1] == stream[-5] and stream[-2] == stream[-4]:
         sym_val = stream[-3]
         if sym_val == val1: s1 += 24.0
@@ -170,7 +170,7 @@ def analyze_B_engine(records):
         'all_probs': norm_probs
     }
 
-# 통계 계산 함수 (A/B 각각 적중률)
+# 통계 계산 함수 (추천 적중률 + 지울 픽 성공률 통합 집계)
 def calculate_ab_stats(records, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records[-limit_recent:]
     else: eval_records = records
@@ -180,6 +180,7 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
 
     tot_a, tot_b = 0, 0
     a_win, b_win = 0, 0
+    a_avoid_win, b_avoid_win = 0, 0  # 안 나온 조합 지우기 성공 횟수
 
     for i in range(3, n):
         act = eval_records[i]['result']
@@ -194,14 +195,18 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
         if res_a:
             tot_a += 1
             if res_a['top'] == act: a_win += 1
+            if res_a['worst'] != act: a_avoid_win += 1  # 지울 픽이 안 나왔으면 성공
 
         if res_b:
             tot_b += 1
             if res_b['top'] == act: b_win += 1
+            if res_b['worst'] != act: b_avoid_win += 1  # 지울 픽이 안 나왔으면 성공
 
     return {
         'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
-        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0
+        'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
+        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0,
+        'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
 # 백업 상태 관리
@@ -280,7 +285,9 @@ else:
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -292,7 +299,9 @@ else:
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -309,7 +318,9 @@ else:
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -328,14 +339,17 @@ else:
         else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
             
-            a_ok = "적중 🎯" if prev_a_res and prev_a_res['top'] == prev_actual else "미적중"
-            b_ok = "적중 🎯" if prev_b_res and prev_b_res['top'] == prev_actual else "미적중"
+            a_ok = "추천적중 🎯" if prev_a_res and prev_a_res['top'] == prev_actual else "추천미적중"
+            a_avoid_ok = "안나옴 성공 🎯" if prev_a_res and prev_a_res['worst'] != prev_actual else "나와버림 ❌"
+
+            b_ok = "추천적중 🎯" if prev_b_res and prev_b_res['top'] == prev_actual else "추천미적중"
+            b_avoid_ok = "안나옴 성공 🎯" if prev_b_res and prev_b_res['worst'] != prev_actual else "나와버림 ❌"
 
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_a_res:
-                st.markdown(f"🅰️ **A 추천 ({prev_a_res['top']}) / 지울픽 ({prev_a_res['worst']})** ➔ **{a_ok}**")
+                st.markdown(f"🅰️ **A 추천 ({prev_a_res['top']}) ➔ {a_ok}** / **지울픽 ({prev_a_res['worst']}) ➔ {a_avoid_ok}**")
             if prev_b_res:
-                st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) / 지울픽 ({prev_b_res['worst']})** ➔ **{b_ok}**")
+                st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {b_avoid_ok}**")
 
     st.markdown("---")
 
@@ -347,13 +361,13 @@ else:
     
     if curr_a_res:
         st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
-        st.markdown(f"   ⚠️ **지울 픽: `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
+        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
     
     st.markdown(" ")
     
     if curr_b_res:
         st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
-        st.markdown(f"   ⚠️ **지울 픽: `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
+        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
