@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 A/B 패턴 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -62,7 +62,7 @@ def save_data(records):
     except Exception:
         pass
 
-# 🅰️ [A 엔진: 장줄 & 퐁당 중심 연산]
+# 🅰️ [A 엔진 연산]
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -91,13 +91,13 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_A_engine(records):
-    valid = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
+def analyze_A_engine_tuple(records_tuple):
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid) < 3: return None
 
-    s_s = calculate_score_A_engine([ITEM_MAP[r['result']][0] for r in valid], '우', '좌')
-    l_s = calculate_score_A_engine([ITEM_MAP[r['result']][1] for r in valid], '사', '삼')
-    o_s = calculate_score_A_engine([ITEM_MAP[r['result']][2] for r in valid], '짝', '홀')
+    s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_A_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_A_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
 
     probs = {}
     for c in ALL_COMBOS:
@@ -110,11 +110,10 @@ def analyze_A_engine(records):
 
     return {
         'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1],
-        'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1],
-        'all_probs': norm_probs
+        'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 🅱️ [B 엔진: 투박스/삼박스, 계단, 데칼 중심 연산]
+# 🅱️ [B 엔진 연산]
 def calculate_score_B_engine(stream, val1, val2):
     n = len(stream)
     if n < 4: return {val1: 50.0, val2: 50.0}
@@ -142,13 +141,13 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_B_engine(records):
-    valid = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
+def analyze_B_engine_tuple(records_tuple):
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid) < 4: return None
 
-    s_s = calculate_score_B_engine([ITEM_MAP[r['result']][0] for r in valid], '우', '좌')
-    l_s = calculate_score_B_engine([ITEM_MAP[r['result']][1] for r in valid], '사', '삼')
-    o_s = calculate_score_B_engine([ITEM_MAP[r['result']][2] for r in valid], '짝', '홀')
+    s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_B_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_B_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
 
     probs = {}
     for c in ALL_COMBOS:
@@ -161,14 +160,14 @@ def analyze_B_engine(records):
 
     return {
         'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1],
-        'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1],
-        'all_probs': norm_probs
+        'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 통계 계산 함수
-def calculate_ab_stats(records, target_date=None, limit_recent=None):
-    if limit_recent: eval_records = records[-limit_recent:]
-    else: eval_records = records
+# ⚡ 캐싱된 통계 집계 함수 (속도 개선 핵심)
+@st.cache_data(show_spinner=False)
+def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
+    if limit_recent: eval_records = records_tuple[-limit_recent:]
+    else: eval_records = records_tuple
 
     n = len(eval_records)
     if n < 4: return None
@@ -178,14 +177,14 @@ def calculate_ab_stats(records, target_date=None, limit_recent=None):
     a_avoid_win, b_avoid_win = 0, 0
 
     for i in range(3, n):
-        act = eval_records[i]['result']
+        act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
-        if target_date and eval_records[i]['date'] != target_date: continue
+        if target_date and eval_records[i][0] != target_date: continue
 
         past_sub = eval_records[:i]
         
-        res_a = analyze_A_engine(past_sub)
-        res_b = analyze_B_engine(past_sub)
+        res_a = analyze_A_engine_tuple(past_sub)
+        res_b = analyze_B_engine_tuple(past_sub)
 
         if res_a:
             tot_a += 1
@@ -214,6 +213,7 @@ def push_backup():
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
 records = st.session_state.records
+records_tuple = tuple((r['date'], r['round'], r['result']) for r in records)
 
 # 1. 대량 입력 모드
 if st.session_state.show_bulk:
@@ -234,6 +234,7 @@ if st.session_state.show_bulk:
                 curr_rd += 1
                 if curr_rd > 288: curr_rd = 1
             save_data(st.session_state.records)
+            st.cache_data.clear()
             st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
             st.session_state.show_bulk = False
             st.rerun()
@@ -259,6 +260,7 @@ elif not records:
         push_backup()
         st.session_state.records.append({'date': init_date.strftime("%Y-%m-%d"), 'round': int(init_round), 'result': sel})
         save_data(st.session_state.records)
+        st.cache_data.clear()
         st.rerun()
 
 # 3. 메인 분석 화면
@@ -276,27 +278,27 @@ else:
     st.markdown("---")
 
     # 1. 전체 누적 통계
-    all_stat = calculate_ab_stats(records)
+    all_stat = calculate_ab_stats_cached(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
     # 2. 최근 3000개 누적 통계
-    recent_stat = calculate_ab_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_stat = calculate_ab_stats_cached(records_tuple, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
@@ -309,23 +311,23 @@ else:
     except Exception:
         w_str = ""
 
-    today_stat = calculate_ab_stats(records, target_date=curr_date)
+    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **A 지울 픽 성공률 (안 나옴) : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **B 지울 픽 성공률 (안 나옴) : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
     # 4. 직전 회차 결과
-    if len(records) >= 4:
-        prev_sub = records[:-1]
-        prev_a_res = analyze_A_engine(prev_sub)
-        prev_b_res = analyze_B_engine(prev_sub)
+    if len(records_tuple) >= 4:
+        prev_sub = records_tuple[:-1]
+        prev_a_res = analyze_A_engine_tuple(prev_sub)
+        prev_b_res = analyze_B_engine_tuple(prev_sub)
         prev_actual = last_rec['result']
         
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
@@ -349,8 +351,8 @@ else:
     st.markdown("---")
 
     # 5. 이번회차 A/B 예측 추천 표출
-    curr_a_res = analyze_A_engine(records)
-    curr_b_res = analyze_B_engine(records)
+    curr_a_res = analyze_A_engine_tuple(records_tuple)
+    curr_b_res = analyze_B_engine_tuple(records_tuple)
 
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     
@@ -383,6 +385,7 @@ else:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
         save_data(st.session_state.records)
+        st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
@@ -392,6 +395,7 @@ else:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         save_data(st.session_state.records)
+        st.cache_data.clear()
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
@@ -400,35 +404,38 @@ else:
             push_backup()
             st.session_state.records.pop()
             save_data(st.session_state.records)
+            st.cache_data.clear()
             st.rerun()
 
     if m3.button("초기화", use_container_width=True):
         push_backup()
         st.session_state.records = []
         if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
+        st.cache_data.clear()
         st.rerun()
 
     if m4.button("되돌리기", use_container_width=True):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
+            st.cache_data.clear()
             st.rerun()
 
     st.markdown("---")
 
     # 6. 당일 세부 결과 전체 표출
     st.markdown("**오늘 세부 결과 (A/B 적중 리스트)**")
-    if len(records) >= 4:
+    if len(records_tuple) >= 4:
         rows = []
-        today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
+        today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
         
         for i in reversed(today_indices):
             if i < 3: continue
-            p_sub = records[:i]
-            res_a_prev = analyze_A_engine(p_sub)
-            res_b_prev = analyze_B_engine(p_sub)
-            act_item = records[i]['result']
-            rd_num = records[i]['round']
+            p_sub = records_tuple[:i]
+            res_a_prev = analyze_A_engine_tuple(p_sub)
+            res_b_prev = analyze_B_engine_tuple(p_sub)
+            act_item = records_tuple[i][2]
+            rd_num = records_tuple[i][1]
             
             if act_item == "PASS":
                 continue
