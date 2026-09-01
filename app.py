@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 4조합 통분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 7대패턴 통분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -24,6 +24,13 @@ DATA_FILE = os.path.join(BASE_DIR, "ladder_data_history.txt")
 MAX_DATA_SIZE = 3000
 
 ALL_COMBOS = ['우사', '우삼', '좌사', '좌삼']
+
+ITEM_MAP = {
+    '우사': ('우', '사', '짝'),
+    '우삼': ('우', '삼', '홀'),
+    '좌사': ('좌', '사', '홀'),
+    '좌삼': ('좌', '삼', '짝')
+}
 
 ITEM_FULL_MAP = {
     '우사': '우사짝',
@@ -55,57 +62,94 @@ def save_data(records):
     except Exception:
         pass
 
-# 4조합 통분석 엔진 (추천 픽 + 안 나올 픽 동시 산출)
+# 7대 패턴 정밀 스캔 엔진 (단일 스트림용)
+def calculate_stream_pattern_score(stream, val1, val2):
+    n = len(stream)
+    if n < 4:
+        return {val1: 50.0, val2: 50.0}
+
+    score1, score2 = 50.0, 50.0
+
+    # 1. 🔥 장줄 패턴 (3연속 이상)
+    if stream[-1] == stream[-2] == stream[-3]:
+        rec = stream[-1]
+        streak = 3
+        for idx in range(4, min(n + 1, 10)):
+            if stream[-idx] == rec:
+                streak += 1
+            else:
+                break
+        bonus = min(15.0 + (streak * 3.5), 35.0)
+        if rec == val1: score1 += bonus
+        else: score2 += bonus
+
+    # 2. ⚡ 퐁당 패턴 (연속 꺾임)
+    elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
+        streak = 3
+        for idx in range(4, min(n + 1, 10)):
+            if stream[-idx + 1] != stream[-idx]:
+                streak += 1
+            else:
+                break
+        opp_val = val2 if stream[-1] == val1 else val1
+        bonus = min(12.0 + (streak * 2.5), 30.0)
+        if opp_val == val1: score1 += bonus
+        else: score2 += bonus
+
+    # 3. 📦 투박스(2-2) & 삼박스(3-3) 진행/완성 패턴
+    elif n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
+        same_val = stream[-1]
+        if same_val == val1: score1 += 18.0
+        else: score2 += 18.0
+    elif n >= 5 and stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
+        opp_val = val2 if stream[-1] == val1 else val1
+        if opp_val == val1: score1 += 20.0
+        else: score2 += 20.0
+
+    # 4. 📶 계단 및 대칭 패턴 (123 / 321 / 데칼)
+    elif n >= 6:
+        if stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4] and stream[-4] != stream[-5]:
+            same_val = stream[-1]
+            if same_val == val1: score1 += 16.0
+            else: score2 += 16.0
+        elif stream[-1] == stream[-2] == stream[-3] and stream[-3] != stream[-4] and stream[-4] == stream[-5] and stream[-5] != stream[-6]:
+            opp_val = val2 if stream[-1] == val1 else val1
+            if opp_val == val1: score1 += 15.0
+            else: score2 += 15.0
+
+    tot = score1 + score2
+    return {val1: (score1 / tot) * 100.0, val2: (score2 / tot) * 100.0}
+
+# 3구멍 독립 스캔 ➔ 4조합 통분석 합성 엔진
 def analyze_combo_prediction(records):
     valid_records = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
     if len(valid_records) < 4:
         return None
 
-    combos = [r['result'] for r in valid_records]
-    n = len(combos)
+    s_stream = [ITEM_MAP[r['result']][0] for r in valid_records]
+    l_stream = [ITEM_MAP[r['result']][1] for r in valid_records]
+    o_stream = [ITEM_MAP[r['result']][2] for r in valid_records]
 
-    # 조합별 최근 출현 위치(간격) 계산
-    last_seen = {c: 999 for c in ALL_COMBOS}
-    for idx, c in enumerate(reversed(combos)):
-        if last_seen[c] == 999:
-            last_seen[c] = idx
+    s_scores = calculate_stream_pattern_score(s_stream, '우', '좌')
+    l_scores = calculate_stream_pattern_score(l_stream, '사', '삼')
+    o_scores = calculate_stream_pattern_score(o_stream, '짝', '홀')
 
-    scores = {c: 50.0 for c in ALL_COMBOS}
+    combo_probs = {}
+    for combo in ALL_COMBOS:
+        s_val, l_val, o_val = ITEM_MAP[combo]
+        # 3구멍 가중 확률 결합
+        p_s = s_scores[s_val] / 100.0
+        p_l = l_scores[l_val] / 100.0
+        p_o = o_scores[o_val] / 100.0
+        
+        raw_prob = p_s * p_l * p_o
+        combo_probs[combo] = raw_prob
 
-    # 1. 🔥 조합 장줄 분석 (3연속 이상)
-    if combos[-1] == combos[-2] == combos[-3]:
-        top_c = combos[-1]
-        streak = 3
-        for idx in range(4, min(n + 1, 10)):
-            if combos[-idx] == top_c:
-                streak += 1
-            else:
-                break
-        scores[top_c] += (20.0 + streak * 3.0)
+    # 4조합 정규화 (총합 100%)
+    tot_p = sum(combo_probs.values())
+    final_probs = {c: (p / tot_p) * 100.0 for c, p in combo_probs.items()}
 
-    # 2. ⚡ 조합 퐁당 분석 (2개 조합 교대)
-    elif combos[-1] != combos[-2] and combos[-1] == combos[-3] and combos[-2] == combos[-4]:
-        next_c = combos[-2]
-        scores[next_c] += 25.0
-
-    # 3. 📦 조합 투박스 분석 (2개씩 출현)
-    elif combos[-1] == combos[-2] and combos[-1] != combos[-3]:
-        same_c = combos[-1]
-        scores[same_c] += 18.0
-    elif combos[-1] != combos[-2] and combos[-2] == combos[-3] and combos[-3] != combos[-4]:
-        opp_c = combos[-1]
-        scores[opp_c] += 15.0
-
-    # 최장 미출현 조합 감점 (안 나올 조합 확률 증가)
-    for c in ALL_COMBOS:
-        if last_seen[c] >= 10:
-            scores[c] -= 15.0
-
-    sorted_combos = sorted(scores.items(), key=lambda x: x[1], reverse=True)
-    
-    # 점수 정규화 ➔ 확률(%) 계산
-    total_score = sum(s[1] for s in sorted_combos)
-    prob_dict = {c: (score / total_score) * 100.0 for c, score in sorted_combos}
+    sorted_combos = sorted(final_probs.items(), key=lambda x: x[1], reverse=True)
 
     top_recommend = sorted_combos[0][0]  # 가장 나올 조합
     worst_avoid = sorted_combos[-1][0]   # 가장 안 나올 조합
@@ -113,14 +157,14 @@ def analyze_combo_prediction(records):
     return {
         'top_recommend': top_recommend,
         'top_full': ITEM_FULL_MAP[top_recommend],
-        'top_prob': prob_dict[top_recommend],
+        'top_prob': sorted_combos[0][1],
         'worst_avoid': worst_avoid,
         'worst_full': ITEM_FULL_MAP[worst_avoid],
-        'worst_prob': prob_dict[worst_avoid],  # 안 나올 확률 (%)
-        'all_probs': prob_dict
+        'worst_prob': sorted_combos[-1][1],  # 안 나올 확률 (%)
+        'all_probs': final_probs
     }
 
-# 통계 계산
+# 통계 계산 최적화 함수
 def calculate_combo_stats(records, target_date=None, limit_recent=None):
     if limit_recent:
         eval_records = records[-limit_recent:]
@@ -133,7 +177,7 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
 
     tot_count = 0
     hit_win = 0
-    avoid_win = 0  # 안 나올 조합(지운 픽)이 실제로 안 나와서 적중한 횟수
+    avoid_win = 0
 
     for i in range(4, n):
         act = eval_records[i]['result']
@@ -150,7 +194,7 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
             if pred['top_recommend'] == act:
                 hit_win += 1
             if pred['worst_avoid'] != act:
-                avoid_win += 1  # 지운 픽 적중 성공
+                avoid_win += 1
 
     if tot_count == 0:
         return None
@@ -251,7 +295,19 @@ else:
 
     st.markdown("---")
 
-    # 2. 오늘 누적 승률
+    # 2. 최근 3000개 누적 승률
+    recent_stat = calculate_combo_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    if recent_stat:
+        st.markdown(f"⚠️ **안 나올 조합(지운 픽) 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (승률 {recent_stat['avoid_rate']:.1f}%)**")
+        st.markdown(f"🎯 단독 추천 조합 적중률 : {recent_stat['hit_win']}승 {recent_stat['hit_lose']}패 (승률 {recent_stat['hit_rate']:.1f}%)")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 3. 오늘 누적 승률
     try:
         dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
         w_str = WEEKDAYS[dt_obj.weekday()]
@@ -268,7 +324,7 @@ else:
 
     st.markdown("---")
 
-    # 3. 직전 회차 결과
+    # 4. 직전 회차 결과
     if len(records) >= 5:
         prev_sub = records[:-1]
         prev_pred = analyze_combo_prediction(prev_sub)
@@ -288,10 +344,10 @@ else:
 
     st.markdown("---")
 
-    # 4. 이번회차 안 나올 확률 & 예측 표출
+    # 5. 이번회차 안 나올 확률 & 예측 표출
     curr_pred = analyze_combo_prediction(records)
     if curr_pred:
-        st.markdown(f"**이번회차 4조합 통분석 ( {next_round}회차 )**")
+        st.markdown(f"**이번회차 7대패턴 합성분석 ( {next_round}회차 )**")
         st.markdown(f"⚠️ **가장 안 나올 조합 (지울 픽) : {curr_pred['worst_avoid']} ({curr_pred['worst_full']})** `출현확률 {curr_pred['worst_prob']:.1f}%`")
         st.markdown(f"🎯 가장 나올 조합 (추천 픽) : **{curr_pred['top_recommend']} ({curr_pred['top_full']})** `출현확률 {curr_pred['top_prob']:.1f}%`")
     else:
