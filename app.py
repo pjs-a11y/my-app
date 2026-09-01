@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 A/B 속성 교집합 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 A/B 속성 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -74,7 +74,7 @@ def extract_common_attributes(combo1, combo2):
     
     if commons:
         return "/".join(commons)
-    return "공통 없음 (대칭)"
+    return "대칭 (없음)"
 
 # 🅰️ [A 엔진: 장줄 & 퐁당 중심]
 def calculate_score_A_3way(stream, val1, val2):
@@ -82,12 +82,10 @@ def calculate_score_A_3way(stream, val1, val2):
     if n < 3: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 장줄 스캔
     if stream[-1] == stream[-2] == stream[-3]:
         rec = stream[-1]
         if rec == val1: s1 += 30.0
         else: s2 += 30.0
-    # 퐁당 스캔
     elif stream[-1] != stream[-2] and stream[-2] != stream[-3]:
         opp_val = val2 if stream[-1] == val1 else val1
         if opp_val == val1: s1 += 25.0
@@ -98,9 +96,8 @@ def calculate_score_A_3way(stream, val1, val2):
 
 def analyze_A_engine(records):
     valid = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
-    if len(valid) < 4: return None, None, "데이터 부족"
+    if len(valid) < 4: return "분석중"
 
-    # 1. 3원화 분석
     s_s = calculate_score_A_3way([ITEM_MAP[r['result']][0] for r in valid], '우', '좌')
     l_s = calculate_score_A_3way([ITEM_MAP[r['result']][1] for r in valid], '사', '삼')
     o_s = calculate_score_A_3way([ITEM_MAP[r['result']][2] for r in valid], '짝', '홀')
@@ -111,7 +108,6 @@ def analyze_A_engine(records):
         probs_3way[c] = (s_s[s]/100.0) * (l_s[l]/100.0) * (o_s[o]/100.0)
     top_3way = sorted(probs_3way.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # 2. 조합통합 분석 (장줄/퐁당 직접)
     combo_stream = [r['result'] for r in valid]
     c_scores = {c: 25.0 for c in ALL_COMBOS}
     if combo_stream[-1] == combo_stream[-2]:
@@ -120,9 +116,7 @@ def analyze_A_engine(records):
         c_scores[combo_stream[-1]] += 20.0
     top_combo = sorted(c_scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # 3. 1+2 교집합 추출
-    common_res = extract_common_attributes(top_3way, top_combo)
-    return top_3way, top_combo, common_res
+    return extract_common_attributes(top_3way, top_combo)
 
 # 🅱️ [B 엔진: 박스 & 계단 중심]
 def calculate_score_B_3way(stream, val1, val2):
@@ -130,12 +124,10 @@ def calculate_score_B_3way(stream, val1, val2):
     if n < 4: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
 
-    # 투박스(222) / 삼박스(333) 스캔
     if stream[-2] == stream[-3] and stream[-1] != stream[-2]:
         same_val = stream[-1]
         if same_val == val1: s1 += 28.0
         else: s2 += 28.0
-    # 계단식(123/321) 스캔
     elif n >= 6 and stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4]:
         same_val = stream[-1]
         if same_val == val1: s1 += 22.0
@@ -146,9 +138,8 @@ def calculate_score_B_3way(stream, val1, val2):
 
 def analyze_B_engine(records):
     valid = [r for r in records if r['result'] in ALL_COMBOS][-MAX_DATA_SIZE:]
-    if len(valid) < 4: return None, None, "데이터 부족"
+    if len(valid) < 4: return "분석중"
 
-    # 1. 3원화 분석
     s_s = calculate_score_B_3way([ITEM_MAP[r['result']][0] for r in valid], '우', '좌')
     l_s = calculate_score_B_3way([ITEM_MAP[r['result']][1] for r in valid], '사', '삼')
     o_s = calculate_score_B_3way([ITEM_MAP[r['result']][2] for r in valid], '짝', '홀')
@@ -159,7 +150,6 @@ def analyze_B_engine(records):
         probs_3way[c] = (s_s[s]/100.0) * (l_s[l]/100.0) * (o_s[o]/100.0)
     top_3way = sorted(probs_3way.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # 2. 조합통합 분석 (박스/계단 직접)
     combo_stream = [r['result'] for r in valid]
     c_scores = {c: 25.0 for c in ALL_COMBOS}
     last_seen = {c: 999 for c in ALL_COMBOS}
@@ -170,9 +160,47 @@ def analyze_B_engine(records):
         if 2 <= last_seen[c] <= 4: c_scores[c] += 20.0
     top_combo = sorted(c_scores.items(), key=lambda x: x[1], reverse=True)[0][0]
 
-    # 3. 1+2 교집합 추출
-    common_res = extract_common_attributes(top_3way, top_combo)
-    return top_3way, top_combo, common_res
+    return extract_common_attributes(top_3way, top_combo)
+
+# 통계 계산 함수 (A결과 / B결과 적중률)
+def calculate_ab_stats(records, target_date=None, limit_recent=None):
+    if limit_recent: eval_records = records[-limit_recent:]
+    else: eval_records = records
+
+    n = len(eval_records)
+    if n < 5: return None
+
+    tot_a, tot_b = 0, 0
+    a_win, b_win = 0, 0
+
+    for i in range(4, n):
+        act = eval_records[i]['result']
+        if act not in ALL_COMBOS: continue
+        if target_date and eval_records[i]['date'] != target_date: continue
+
+        act_full = ITEM_FULL_MAP[act]
+        past_sub = eval_records[:i]
+        
+        res_a = analyze_A_engine(past_sub)
+        res_b = analyze_B_engine(past_sub)
+
+        if res_a != "대칭 (없음)" and res_a != "분석중":
+            tot_a += 1
+            # 슬래시(/) 분할 속성 대응
+            sub_attrs = res_a.split('/')
+            if any(attr in act_full for attr in sub_attrs):
+                a_win += 1
+
+        if res_b != "대칭 (없음)" and res_b != "분석중":
+            tot_b += 1
+            sub_attrs = res_b.split('/')
+            if any(attr in act_full for attr in sub_attrs):
+                b_win += 1
+
+    return {
+        'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
+        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0
+    }
 
 # 백업 상태 관리
 if "records" not in st.session_state: st.session_state.records = load_data()
@@ -245,23 +273,80 @@ else:
 
     st.markdown("---")
 
-    # 이번회차 A/B 공통 속성 교집합 결과 표출
-    a_3w, a_cb, a_res = analyze_A_engine(records)
-    b_3w, b_cb, b_res = analyze_B_engine(records)
-
-    st.markdown(f"**🔥 이번회차 A/B 공통 속성 추출 ( {next_round}회차 )**")
-    
-    st.markdown("**[A : 장줄/퐁당 패턴 연산]**")
-    st.markdown(f"1. 3원화 분석 : `{a_3w}` ({ITEM_FULL_MAP.get(a_3w, '-')})")
-    st.markdown(f"2. 조합통합 분석 : `{a_cb}` ({ITEM_FULL_MAP.get(a_cb, '-')})")
-    st.markdown(f"👉 **A 결과 (1+2 공통속성) : `{a_res}`**")
+    # 1. 전체 누적 통계
+    all_stat = calculate_ab_stats(records)
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    if all_stat:
+        st.markdown(f"🅰️ **A 결과 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B 결과 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    st.markdown("**[B : 박스/계단 패턴 연산]**")
-    st.markdown(f"1. 3원화 분석 : `{b_3w}` ({ITEM_FULL_MAP.get(b_3w, '-')})")
-    st.markdown(f"2. 조합통합 분석 : `{b_cb}` ({ITEM_FULL_MAP.get(b_cb, '-')})")
-    st.markdown(f"👉 **B 결과 (1+2 공통속성) : `{b_res}`**")
+    # 2. 최근 3000개 누적 통계
+    recent_stat = calculate_ab_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    if recent_stat:
+        st.markdown(f"🅰️ **A 결과 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B 결과 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 3. 오늘 누적 통계
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
+
+    today_stat = calculate_ab_stats(records, target_date=curr_date)
+    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
+    if today_stat:
+        st.markdown(f"🅰️ **A 결과 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B 결과 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 4. 직전 회차 결과
+    if len(records) >= 5:
+        prev_sub = records[:-1]
+        prev_a_res = analyze_A_engine(prev_sub)
+        prev_b_res = analyze_B_engine(prev_sub)
+        prev_actual = last_rec['result']
+        
+        st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
+        if prev_actual == "PASS":
+            st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
+        else:
+            act_full = ITEM_FULL_MAP[prev_actual]
+            
+            a_ok = "미적중"
+            if prev_a_res != "대칭 (없음)" and any(a in act_full for a in prev_a_res.split('/')):
+                a_ok = "적중 🎯"
+
+            b_ok = "미적중"
+            if prev_b_res != "대칭 (없음)" and any(b in act_full for b in prev_b_res.split('/')):
+                b_ok = "적중 🎯"
+
+            st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
+            st.markdown(f"🅰️ **A 결과 ({prev_a_res})** ➔ **{a_ok}**")
+            st.markdown(f"🅱️ **B 결과 ({prev_b_res})** ➔ **{b_ok}**")
+
+    st.markdown("---")
+
+    # 5. 이번회차 A/B 결과 분석 표출
+    curr_a_res = analyze_A_engine(records)
+    curr_b_res = analyze_B_engine(records)
+
+    st.markdown(f"**이번회차 A/B 결과 분석 ( {next_round}회차 )**")
+    st.markdown(f"🅰️ **A 결과 : `{curr_a_res}`**")
+    st.markdown(f"🅱️ **B 결과 : `{curr_b_res}`**")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -315,8 +400,8 @@ else:
 
     st.markdown("---")
 
-    # 당일 세부 결과 표출
-    st.markdown("**오늘 세부 결과 (A/B 추출 속성 적중 리스트)**")
+    # 6. 당일 세부 결과 전체 표출
+    st.markdown("**오늘 세부 결과 (A/B 결과 적중 리스트)**")
     if len(records) >= 5:
         rows = []
         today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
@@ -324,30 +409,31 @@ else:
         for i in reversed(today_indices):
             if i < 4: continue
             p_sub = records[:i]
-            _, _, res_a_prev = analyze_A_engine(p_sub)
-            _, _, res_b_prev = analyze_B_engine(p_sub)
+            res_a_prev = analyze_A_engine(p_sub)
+            res_b_prev = analyze_B_engine(p_sub)
             act_item = records[i]['result']
             rd_num = records[i]['round']
             
             if act_item == "PASS":
-                rows.append({"회차": f"{rd_num}회", "실제 결과": "패스", "A 결과": "-", "B 결과": "-"})
+                rows.append({"회차": f"{rd_num}회", "실제 결과": "패스", "A 결과": "-", "A 적중": "-", "B 결과": "-", "B 적중": "-"})
             else:
-                act_full = ITEM_FULL_MAP[act_item]  # 예: '우사짝'
+                act_full = ITEM_FULL_MAP[act_item]
                 
-                # 적중 여부 판정
                 a_match = "미적중"
-                if res_a_prev != "공통 없음 (대칭)" and res_a_prev in act_full:
+                if res_a_prev != "대칭 (없음)" and any(a in act_full for a in res_a_prev.split('/')):
                     a_match = "적중 🎯"
 
                 b_match = "미적중"
-                if res_b_prev != "공통 없음 (대칭)" and res_b_prev in act_full:
+                if res_b_prev != "대칭 (없음)" and any(b in act_full for b in res_b_prev.split('/')):
                     b_match = "적중 🎯"
 
                 rows.append({
                     "회차": f"{rd_num}회",
                     "실제 결과": f"{act_item} ({act_full})",
-                    "A 추출 결과": f"{res_a_prev} ({a_match})",
-                    "B 추출 결과": f"{res_b_prev} ({b_match})"
+                    "A 결과": res_a_prev,
+                    "A 적중": a_match,
+                    "B 결과": res_b_prev,
+                    "B 적중": b_match
                 })
         
         if rows:
