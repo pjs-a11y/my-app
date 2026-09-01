@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime
 
 # 페이지 기본 설정
-st.set_page_config(page_title="키노사다리 A/B 듀얼 추천 분석기", page_icon="📊", layout="centered")
+st.set_page_config(page_title="키노사다리 A/B 듀얼 분석기", page_icon="📊", layout="centered")
 
 # 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
 st.markdown("""
@@ -131,22 +131,19 @@ def analyze_method_B(records):
     if len(valid_records) < 4: return None
 
     combo_stream = [r['result'] for r in valid_records]
-    n = len(combo_stream)
 
     scores = {c: 25.0 for c in ALL_COMBOS}
 
-    # 1. 조합 직접 연속성 (장줄)
+    # 1. 조합 직접 연속성
     if combo_stream[-1] == combo_stream[-2]:
         scores[combo_stream[-1]] += 20.0
 
-    # 2. 조합 교차 패턴 (퐁당)
+    # 2. 조합 교차 패턴
     elif combo_stream[-1] != combo_stream[-2] and combo_stream[-2] == combo_stream[-3]:
         scores[combo_stream[-1]] += 15.0
 
-    # 3. 출현 주기(미출현 갭) 가산점
-    last_seen = {}
-    for c in ALL_COMBOS:
-        last_seen[c] = 999
+    # 3. 미출현 갭 가산점
+    last_seen = {c: 999 for c in ALL_COMBOS}
     for idx, c in enumerate(reversed(combo_stream)):
         if last_seen[c] == 999:
             last_seen[c] = idx
@@ -161,7 +158,7 @@ def analyze_method_B(records):
 
     return sorted_combos[0][0], sorted_combos[0][1]
 
-# 통계 집계 함수
+# 승패 및 승률 집계 함수 (상세)
 def calculate_combo_stats(records, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records[-limit_recent:]
     else: eval_records = records
@@ -190,8 +187,8 @@ def calculate_combo_stats(records, target_date=None, limit_recent=None):
 
     return {
         'total': tot_count,
-        'a_win': a_win, 'a_rate': (a_win / tot_count) * 100.0,
-        'b_win': b_win, 'b_rate': (b_win / tot_count) * 100.0
+        'a_win': a_win, 'a_lose': tot_count - a_win, 'a_rate': (a_win / tot_count) * 100.0,
+        'b_win': b_win, 'b_lose': tot_count - b_win, 'b_rate': (b_win / tot_count) * 100.0
     }
 
 # 백업 상태 관리
@@ -265,18 +262,69 @@ else:
 
     st.markdown("---")
 
-    # 통계 표출
+    # 1. 전체 누적 통계
     all_stat = calculate_combo_stats(records)
-    st.markdown("**전체 누적 통계 (A/B 방식 비교)**")
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
-        st.markdown(f"🅰️ **[현재] 3원화 분석 적중률 : {all_stat['a_win']}승 (승률 {all_stat['a_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **[신규] 조합통합 분석 적중률 : {all_stat['b_win']}승 (승률 {all_stat['b_rate']:.1f}%)**")
+        st.markdown(f"🅰️ **[현재] 3원화 분석 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **[신규] 조합통합 분석 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
     else:
         st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    # 이번회차 듀얼 추천 표출
+    # 2. 최근 3000개 누적 통계
+    recent_stat = calculate_combo_stats(records, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    if recent_stat:
+        st.markdown(f"🅰️ **[현재] 3원화 분석 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **[신규] 조합통합 분석 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 3. 오늘 누적 통계
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
+
+    today_stat = calculate_combo_stats(records, target_date=curr_date)
+    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
+    if today_stat:
+        st.markdown(f"🅰️ **[현재] 3원화 분석 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **[신규] 조합통합 분석 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 4. 직전 회차 결과
+    if len(records) >= 5:
+        prev_sub = records[:-1]
+        prev_a = analyze_method_A(prev_sub)
+        prev_b = analyze_method_B(prev_sub)
+        prev_actual = last_rec['result']
+        
+        st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
+        if prev_actual == "PASS":
+            st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
+        elif prev_a and prev_b:
+            res_a_str = "적중 🎯" if prev_a[0] == prev_actual else "실패"
+            res_b_str = "적중 🎯" if prev_b[0] == prev_actual else "실패"
+            
+            st.markdown(f"실제 결과 : **{prev_actual} ({ITEM_FULL_MAP[prev_actual]})**")
+            st.markdown(f"🅰️ [A방식 추천] : **{prev_a[0]}** ➔ **{res_a_str}**")
+            st.markdown(f"🅱️ [B방식 추천] : **{prev_b[0]}** ➔ **{res_b_str}**")
+        else:
+            st.markdown(f"실제 결과 : **{prev_actual}**")
+
+    st.markdown("---")
+
+    # 5. 이번회차 듀얼 추천 표출
     res_a = analyze_method_A(records)
     res_b = analyze_method_B(records)
 
@@ -336,3 +384,45 @@ else:
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
             st.rerun()
+
+    st.markdown("---")
+
+    # 6. 당일 세부 결과 전체 리스트 표출
+    st.markdown("**오늘 세부 결과 (A/B 추천 적중 여부 전체)**")
+    if len(records) >= 5:
+        rows = []
+        today_indices = [idx for idx, r in enumerate(records) if r['date'] == curr_date]
+        
+        for i in reversed(today_indices):
+            if i < 4: continue
+            p_sub = records[:i]
+            pa = analyze_method_A(p_sub)
+            pb = analyze_method_B(p_sub)
+            act_item = records[i]['result']
+            rd_num = records[i]['round']
+            
+            if act_item == "PASS":
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": "패스 (PASS)",
+                    "A방식 추천": "-",
+                    "A 적중": "-",
+                    "B방식 추천": "-",
+                    "B 적중": "-"
+                })
+            elif pa and pb:
+                a_ok = "성공 🎯" if pa[0] == act_item else "실패"
+                b_ok = "성공 🎯" if pb[0] == act_item else "실패"
+                
+                rows.append({
+                    "회차": f"{rd_num}회",
+                    "실제 결과": f"{act_item} ({ITEM_FULL_MAP[act_item]})",
+                    "A방식 추천": f"{pa[0]} ({ITEM_FULL_MAP[pa[0]]})",
+                    "A 적중": a_ok,
+                    "B방식 추천": f"{pb[0]} ({ITEM_FULL_MAP[pb[0]]})",
+                    "B 적중": b_ok
+                })
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, hide_index=True, use_container_width=True)
