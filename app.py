@@ -8,39 +8,32 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 화면 맞춤형 버튼 레이아웃 CSS
+# 모바일 화면 버튼 가로 강제 정렬 CSS
 st.markdown("""
 <style>
     .block-container { padding: 0.4rem 0.4rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
     
-    /* 결과 입력 전용 콤팩트 가로 컬럼 (스마트폰 한눈에 보이기) */
-    .input-row div[data-testid="stHorizontalBlock"] {
+    /* 결과 입력 전용 콤팩트 가로 강제 고정 */
+    div[data-testid="column"] {
+        min-width: 0px !important;
+        flex: 1 1 0px !important;
+    }
+    div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
         gap: 0.15rem !important;
+        width: 100% !important;
     }
-    .input-row div[data-testid="column"] {
-        flex: 1 1 0px !important;
-        min-width: 0px !important;
-    }
-    .input-row .stButton>button {
-        padding: 0.35rem 0.01rem !important;
-        font-size: 0.78rem !important;
+    
+    .stButton>button {
+        padding: 0.4rem 0.02rem !important;
+        font-size: 0.82rem !important;
         font-weight: bold !important;
         width: 100% !important;
         white-space: nowrap !important;
-    }
-
-    /* 기능 제어 버튼 세로 배열용 스타일 */
-    .ctrl-row .stButton>button {
-        padding: 0.45rem 0.1rem !important;
-        font-size: 0.85rem !important;
-        font-weight: bold !important;
-        width: 100% !important;
-        margin-bottom: 0.2rem !important;
     }
 
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
@@ -397,14 +390,12 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 [결과 입력] 축소된 콤팩트 가로 고정 배치 (스마트폰 한눈에 보임)
-    st.markdown('<div class="input-row">', unsafe_allow_html=True)
-    c1, c2, c3, c4 = st.columns(4)
-    b_um = c1.button("우삼", use_container_width=True)
-    b_us = c2.button("우사", use_container_width=True)
-    b_jm = c3.button("좌삼", use_container_width=True)
-    b_js = c4.button("좌사", use_container_width=True)
-    st.markdown('</div>', unsafe_allow_html=True)
+    # 🟢 [결과 입력] 스마트폰 맞춤형 가로 고정 배치 (4컬럼 1줄)
+    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
+    b_um = c1.button("우삼", key="btn_um")
+    b_us = c2.button("우사", key="btn_us")
+    b_jm = c3.button("좌삼", key="btn_jm")
+    b_js = c4.button("좌사", key="btn_js")
 
     input_val = None
     if b_um: input_val = "우삼"
@@ -421,9 +412,8 @@ else:
 
     st.markdown("---")
 
-    # 🟢 [기능 버튼] 기존처럼 세로(Vertical)로 순서대로 배열
-    st.markdown('<div class="ctrl-row">', unsafe_allow_html=True)
-    if st.button("패스", use_container_width=True):
+    # 🟢 [기능 제어 버튼] 세로(Vertical) 순차 배열
+    if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         save_data(st.session_state.records)
@@ -431,7 +421,7 @@ else:
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
-    if st.button("직전취소", use_container_width=True):
+    if st.button("직전취소", use_container_width=True, key="btn_cancel"):
         if st.session_state.records:
             push_backup()
             st.session_state.records.pop()
@@ -439,20 +429,19 @@ else:
             st.cache_data.clear()
             st.rerun()
 
-    if st.button("초기화", use_container_width=True):
+    if st.button("초기화", use_container_width=True, key="btn_reset"):
         push_backup()
         st.session_state.records = []
         if os.path.exists(DATA_FILE): os.remove(DATA_FILE)
         st.cache_data.clear()
         st.rerun()
 
-    if st.button("되돌리기", use_container_width=True):
+    if st.button("되돌리기", use_container_width=True, key="btn_undo"):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
             save_data(st.session_state.records)
             st.cache_data.clear()
             st.rerun()
-    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
