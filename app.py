@@ -8,32 +8,41 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 화면 버튼 가로 강제 정렬 CSS
+# 스마트폰 화면 가로 4등분 완벽 고정 CSS
 st.markdown("""
 <style>
-    .block-container { padding: 0.4rem 0.4rem !important; }
+    .block-container { padding: 0.3rem 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
     
-    /* 결과 입력 전용 콤팩트 가로 강제 고정 */
-    div[data-testid="column"] {
-        min-width: 0px !important;
-        flex: 1 1 0px !important;
-    }
+    /* 스마트폰 가로 4등분 강제 배치 */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
         flex-wrap: nowrap !important;
-        gap: 0.15rem !important;
+        gap: 2px !important;
         width: 100% !important;
     }
     
+    div[data-testid="column"] {
+        width: 25% !important;
+        min-width: 0px !important;
+        flex: 1 1 25% !important;
+        padding: 0px !important;
+    }
+    
+    .stButton {
+        width: 100% !important;
+    }
+
     .stButton>button {
-        padding: 0.4rem 0.02rem !important;
-        font-size: 0.82rem !important;
+        padding: 0.45rem 0.01rem !important;
+        font-size: 0.8rem !important;
         font-weight: bold !important;
         width: 100% !important;
+        min-width: 0px !important;
         white-space: nowrap !important;
+        border-radius: 6px !important;
     }
 
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
@@ -390,7 +399,7 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 [결과 입력] 스마트폰 맞춤형 가로 고정 배치 (4컬럼 1줄)
+    # 🟢 [결과 입력] 화면 너비 25% 가로 4등분 고정
     c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
     b_um = c1.button("우삼", key="btn_um")
     b_us = c2.button("우사", key="btn_us")
