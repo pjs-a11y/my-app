@@ -8,38 +8,14 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 가로 4등분 완벽 고정 CSS (Streamlit 모바일 세로전환 완전 차단)
+# 모바일 여백 및 제어 버튼 스타일
 st.markdown("""
 <style>
-    /* 화면 여백 최적화 */
     .block-container { padding: 0.3rem 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
-    
-    /* 🎯 결과 입력 버튼: 모바일 화면에서도 가로 4등분 완전 고정 */
-    div[role="radiogroup"] {
-        display: flex !important;
-        flex-direction: row !important;
-        justify-content: space-between !important;
-        width: 100% !important;
-        gap: 3px !important;
-    }
-    div[role="radiogroup"] > label {
-        flex: 1 1 25% !important;
-        width: 25% !important;
-        min-width: 0px !important;
-        text-align: center !important;
-        justify-content: center !important;
-        padding: 0.55rem 0rem !important;
-        font-size: 0.82rem !important;
-        font-weight: bold !important;
-        background-color: #ffffff !important;
-        border: 1px solid #cccccc !important;
-        border-radius: 6px !important;
-        margin: 0px !important;
-    }
 
-    /* 🎯 하단 제어 버튼: 세로 큼직한 버튼 전용 */
+    /* 🎯 하단 제어 버튼: 세로 큼직한 버튼 */
     .ctrl-container .stButton {
         width: 100% !important;
         margin-bottom: 0.2rem !important;
@@ -244,6 +220,25 @@ if "records" not in st.session_state: st.session_state.records = load_data()
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
+# 쿼리 파라미터로 전송된 입력값 감지
+query_params = st.query_params
+if "sel_val" in query_params:
+    input_val = query_params["sel_val"]
+    st.query_params.clear()
+    
+    last_rec = st.session_state.records[-1] if st.session_state.records else {'date': datetime.now().strftime("%Y-%m-%d"), 'round': 0}
+    curr_date = last_rec['date']
+    next_round = last_rec['round'] + 1
+    if next_round > 288: next_round = 1
+
+    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
+    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
+
+    st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
+    save_data(st.session_state.records)
+    st.cache_data.clear()
+    st.rerun()
+
 def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
@@ -405,25 +400,22 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 [결과 입력] 모바일에서도 무조건 가로 4등분 고정되는 Radio 방식
-    input_val = st.radio(
-        label="결과 선택",
-        options=ALL_COMBOS,
-        index=None,
-        label_visibility="collapsed",
-        key=f"input_radio_{len(records)}"
+    # 🎯 [핵심] 스마트폰에서 무조건 가로 4등분 한 줄로 고정되는 순수 HTML/JS 버튼
+    st.components.v1.html(
+        """
+        <div style="display:flex; flex-direction:row; width:100%; gap:4px; margin:0; padding:0;">
+            <button onclick="window.parent.location.href='?sel_val=우삼'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우삼</button>
+            <button onclick="window.parent.location.href='?sel_val=우사'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우사</button>
+            <button onclick="window.parent.location.href='?sel_val=좌삼'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌삼</button>
+            <button onclick="window.parent.location.href='?sel_val=좌사'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌사</button>
+        </div>
+        """,
+        height=52
     )
-
-    if input_val:
-        push_backup()
-        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
-        save_data(st.session_state.records)
-        st.cache_data.clear()
-        st.rerun()
 
     st.markdown("---")
 
-    # 🟢 [제어 기능] 세로(Vertical) 전용 배치
+    # 🟢 [하단 제어 기능] 세로(Vertical) 전용 배치
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
