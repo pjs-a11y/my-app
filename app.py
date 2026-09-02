@@ -8,41 +8,39 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 스마트폰 화면 가로 4등분 완벽 고정 CSS
+# 모바일 강제 가로 4등분 레이아웃 CSS
 st.markdown("""
 <style>
     .block-container { padding: 0.3rem 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
     
-    /* 스마트폰 가로 4등분 강제 배치 */
-    div[data-testid="stHorizontalBlock"] {
+    /* 결과 입력 4등분 버튼 컨테이너 */
+    .btn-grid {
         display: flex !important;
         flex-direction: row !important;
-        flex-wrap: nowrap !important;
-        gap: 2px !important;
+        justify-content: space-between !important;
+        align-items: center !important;
         width: 100% !important;
+        gap: 4px !important;
+        margin-bottom: 0.5rem !important;
     }
-    
-    div[data-testid="column"] {
-        width: 25% !important;
-        min-width: 0px !important;
-        flex: 1 1 25% !important;
-        padding: 0px !important;
+    .btn-grid form {
+        flex: 1 !important;
+        margin: 0 !important;
     }
-    
-    .stButton {
+    .btn-grid button {
         width: 100% !important;
-    }
-
-    .stButton>button {
-        padding: 0.45rem 0.01rem !important;
-        font-size: 0.8rem !important;
+        padding: 0.5rem 0rem !important;
+        font-size: 0.85rem !important;
         font-weight: bold !important;
-        width: 100% !important;
-        min-width: 0px !important;
-        white-space: nowrap !important;
+        background-color: #ffffff !important;
+        border: 1px solid #d0d0d0 !important;
         border-radius: 6px !important;
+        color: #333333 !important;
+    }
+    .btn-grid button:active {
+        background-color: #e0e0e0 !important;
     }
 
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
@@ -399,18 +397,22 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 [결과 입력] 화면 너비 25% 가로 4등분 고정
-    c1, c2, c3, c4 = st.columns([1, 1, 1, 1])
-    b_um = c1.button("우삼", key="btn_um")
-    b_us = c2.button("우사", key="btn_us")
-    b_jm = c3.button("좌삼", key="btn_jm")
-    b_js = c4.button("좌사", key="btn_js")
+    # 🟢 스마트폰 완벽 가로 4등분 HTML/CSS 버튼
+    st.markdown("""
+    <div class="btn-grid">
+        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="우삼">우삼</button></form>
+        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="우사">우사</button></form>
+        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="좌삼">좌삼</button></form>
+        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="좌사">좌사</button></form>
+    </div>
+    """, unsafe_allow_html=True)
 
+    # 4등분 버튼 클릭 감지 처리 (쿼리 파라미터 / 폼 제출 대응)
     input_val = None
-    if b_um: input_val = "우삼"
-    elif b_us: input_val = "우사"
-    elif b_jm: input_val = "좌삼"
-    elif b_js: input_val = "좌사"
+    for combo in ALL_COMBOS:
+        if st.button(combo, key=f"btn_alt_{combo}", use_container_width=True):
+            input_val = combo
+            break
 
     if input_val:
         push_backup()
