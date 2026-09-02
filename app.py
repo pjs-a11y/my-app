@@ -8,15 +8,35 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 여백 및 제어 버튼 스타일 (Manage app 버튼 방해 방지 하단 여백 추가)
+# 모바일 여백, 가로 4등분 세그먼트 컨트롤 높이(2/3 축소) 및 하단 여백 CSS
 st.markdown("""
 <style>
-    /* 우측 하단 검정 버튼(Manage app)에 가려지지 않도록 하단 여백 80px 추가 */
+    /* 우측 하단 검정 버튼(Manage app) 방해 방지용 하단 여백 80px */
     .block-container { 
         padding: 0.3rem 0.3rem 80px 0.3rem !important; 
     }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
+
+    /* 🎯 결과 입력 버튼: 모바일 무조건 가로 4등분 + 슬림한 높이(2/3 수준) */
+    div[data-testid="stSegmentedControl"] {
+        width: 100% !important;
+    }
+    div[data-testid="stSegmentedControl"] > div {
+        display: flex !important;
+        flex-direction: row !important;
+        width: 100% !important;
+        gap: 3px !important;
+    }
+    div[data-testid="stSegmentedControl"] button {
+        flex: 1 1 25% !important;
+        width: 25% !important;
+        min-width: 0px !important;
+        padding: 0.3rem 0rem !important;
+        font-size: 0.85rem !important;
+        font-weight: bold !important;
+        height: 38px !important;
+    }
 
     /* 🎯 하단 제어 버튼: 세로 큼직한 버튼 */
     .ctrl-container .stButton {
@@ -25,7 +45,7 @@ st.markdown("""
     }
     .ctrl-container .stButton>button {
         padding: 0.5rem 0.1rem !important;
-        font-size: 0.85rem !important;
+        font-size: 0.88rem !important;
         font-weight: bold !important;
         width: 100% !important;
     }
@@ -38,7 +58,7 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__)) if '__file__' in globals()
 DATA_FILE = os.path.join(BASE_DIR, "ladder_data_history.txt")
 MAX_DATA_SIZE = 3000
 
-ALL_COMBOS = ['우사', '우삼', '좌사', '좌삼']
+ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
 ITEM_MAP = {
     '우사': ('우', '사', '짝'),
@@ -223,25 +243,6 @@ if "records" not in st.session_state: st.session_state.records = load_data()
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
-# 쿼리 파라미터로 전송된 입력값 감지
-query_params = st.query_params
-if "sel_val" in query_params:
-    input_val = query_params["sel_val"]
-    st.query_params.clear()
-    
-    last_rec = st.session_state.records[-1] if st.session_state.records else {'date': datetime.now().strftime("%Y-%m-%d"), 'round': 0}
-    curr_date = last_rec['date']
-    next_round = last_rec['round'] + 1
-    if next_round > 288: next_round = 1
-
-    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
-    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
-
-    st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
-    save_data(st.session_state.records)
-    st.cache_data.clear()
-    st.rerun()
-
 def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
@@ -403,18 +404,21 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🎯 [수정된 부분] 세로 패딩을 12px -> 6px 로 줄여 높이를 기존의 2/3 수준으로 축소
-    st.components.v1.html(
-        """
-        <div style="display:flex; flex-direction:row; width:100%; gap:4px; margin:0; padding:0;">
-            <button onclick="window.parent.location.href='?sel_val=우삼'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우삼</button>
-            <button onclick="window.parent.location.href='?sel_val=우사'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우사</button>
-            <button onclick="window.parent.location.href='?sel_val=좌삼'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌삼</button>
-            <button onclick="window.parent.location.href='?sel_val=좌사'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌사</button>
-        </div>
-        """,
-        height=38
+    # 🎯 [핵심] 파이썬 내장 완벽 작동 + 모바일 슬림 가로 4등분 버튼
+    input_val = st.segmented_control(
+        label="결과 선택",
+        options=ALL_COMBOS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        key=f"seg_ctrl_{len(records)}"
     )
+
+    if input_val:
+        push_backup()
+        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
+        save_data(st.session_state.records)
+        st.cache_data.clear()
+        st.rerun()
 
     st.markdown("---")
 
