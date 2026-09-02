@@ -8,39 +8,51 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 강제 가로 4등분 레이아웃 CSS
+# 스마트폰 화면 맞춤형 가로 4등분 및 세로 제어버튼 완벽 고정 CSS
 st.markdown("""
 <style>
+    /* 전체 여백 최소화 */
     .block-container { padding: 0.3rem 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
     
-    /* 결과 입력 4등분 버튼 컨테이너 */
-    .btn-grid {
+    /* 🎯 결과 입력 전용: 모바일 강제 가로 4등분 */
+    .input-container div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
-        justify-content: space-between !important;
-        align-items: center !important;
+        flex-wrap: nowrap !important;
+        gap: 3px !important;
         width: 100% !important;
-        gap: 4px !important;
-        margin-bottom: 0.5rem !important;
     }
-    .btn-grid form {
-        flex: 1 !important;
-        margin: 0 !important;
+    .input-container div[data-testid="column"] {
+        width: 25% !important;
+        min-width: 0px !important;
+        flex: 1 1 25% !important;
+        padding: 0px !important;
     }
-    .btn-grid button {
+    .input-container .stButton {
         width: 100% !important;
-        padding: 0.5rem 0rem !important;
-        font-size: 0.85rem !important;
+    }
+    .input-container .stButton>button {
+        padding: 0.5rem 0.01rem !important;
+        font-size: 0.82rem !important;
         font-weight: bold !important;
-        background-color: #ffffff !important;
-        border: 1px solid #d0d0d0 !important;
+        width: 100% !important;
+        min-width: 0px !important;
+        white-space: nowrap !important;
         border-radius: 6px !important;
-        color: #333333 !important;
     }
-    .btn-grid button:active {
-        background-color: #e0e0e0 !important;
+
+    /* 🎯 제어 버튼 전용: 세로 큼직한 정렬 */
+    .ctrl-container .stButton {
+        width: 100% !important;
+        margin-bottom: 0.2rem !important;
+    }
+    .ctrl-container .stButton>button {
+        padding: 0.55rem 0.1rem !important;
+        font-size: 0.88rem !important;
+        font-weight: bold !important;
+        width: 100% !important;
     }
 
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
@@ -397,22 +409,20 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 스마트폰 완벽 가로 4등분 HTML/CSS 버튼
-    st.markdown("""
-    <div class="btn-grid">
-        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="우삼">우삼</button></form>
-        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="우사">우사</button></form>
-        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="좌삼">좌삼</button></form>
-        <form action="" method="post" style="display:inline;"><button type="submit" name="input_btn" value="좌사">좌사</button></form>
-    </div>
-    """, unsafe_allow_html=True)
+    # 🟢 결과 입력 전용 가로 4등분 버튼 (유일한 결과입력 버튼)
+    st.markdown('<div class="input-container">', unsafe_allow_html=True)
+    c1, c2, c3, c4 = st.columns(4)
+    b_um = c1.button("우삼", key="btn_um")
+    b_us = c2.button("우사", key="btn_us")
+    b_jm = c3.button("좌삼", key="btn_jm")
+    b_js = c4.button("좌사", key="btn_js")
+    st.markdown('</div>', unsafe_allow_html=True)
 
-    # 4등분 버튼 클릭 감지 처리 (쿼리 파라미터 / 폼 제출 대응)
     input_val = None
-    for combo in ALL_COMBOS:
-        if st.button(combo, key=f"btn_alt_{combo}", use_container_width=True):
-            input_val = combo
-            break
+    if b_um: input_val = "우삼"
+    elif b_us: input_val = "우사"
+    elif b_jm: input_val = "좌삼"
+    elif b_js: input_val = "좌사"
 
     if input_val:
         push_backup()
@@ -423,7 +433,8 @@ else:
 
     st.markdown("---")
 
-    # 🟢 [기능 제어 버튼] 세로(Vertical) 순차 배열
+    # 🟢 제어 기능 전용 세로 버튼
+    st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
@@ -453,6 +464,7 @@ else:
             save_data(st.session_state.records)
             st.cache_data.clear()
             st.rerun()
+    st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
 
