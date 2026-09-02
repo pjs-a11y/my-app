@@ -8,13 +8,31 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 세로 스크롤 최소화 및 가로 버튼 레이아웃 CSS
+# 모바일 화면에서도 버튼이 세로로 떨어지지 않도록 강제 가로(Row) 고정 CSS
 st.markdown("""
 <style>
-    .block-container { padding: 0.5rem 0.6rem !important; }
+    .block-container { padding: 0.4rem 0.5rem !important; }
     h1, h2, h3 { display: none !important; }
-    p, div, span { font-size: 0.82rem !important; line-height: 1.35 !important; }
-    .stButton>button { padding: 0.4rem 0.05rem !important; font-size: 0.85rem !important; font-weight: bold; width: 100% !important; }
+    p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
+    
+    /* 컬럼 세로 전환 강제 방지 (모바일 가로 고정) */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        gap: 0.2rem !important;
+    }
+    div[data-testid="column"] {
+        flex: 1 1 0px !important;
+        min-width: 0px !important;
+    }
+    .stButton>button {
+        padding: 0.4rem 0.02rem !important;
+        font-size: 0.82rem !important;
+        font-weight: bold !important;
+        width: 100% !important;
+        white-space: nowrap !important;
+    }
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -163,7 +181,7 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ 캐싱된 통계 집계 함수 (속도 개선 핵심)
+# ⚡ 캐싱된 통계 집계 함수
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
@@ -369,7 +387,7 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🟢 결과 입력 가로 배치 (4컬럼 한 줄)
+    # 🟢 결과 입력 가로 고정 배치 (4컬럼 1줄)
     c1, c2, c3, c4 = st.columns(4)
     b_um = c1.button("우삼", use_container_width=True)
     b_us = c2.button("우사", use_container_width=True)
@@ -391,7 +409,7 @@ else:
 
     st.markdown("---")
 
-    # 🟢 제어 기능 버튼 가로 배치 (4컬럼 한 줄)
+    # 🟢 제어 기능 가로 고정 배치 (4컬럼 1줄)
     m1, m2, m3, m4 = st.columns(4)
     if m1.button("패스", use_container_width=True):
         push_backup()
