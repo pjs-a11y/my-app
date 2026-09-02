@@ -8,10 +8,13 @@ from datetime import datetime
 # 페이지 기본 설정
 st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
 
-# 모바일 여백 및 제어 버튼 스타일
+# 모바일 여백 및 제어 버튼 스타일 (Manage app 버튼 방해 방지 하단 여백 추가)
 st.markdown("""
 <style>
-    .block-container { padding: 0.3rem 0.3rem !important; }
+    /* 우측 하단 검정 버튼(Manage app)에 가려지지 않도록 하단 여백 80px 추가 */
+    .block-container { 
+        padding: 0.3rem 0.3rem 80px 0.3rem !important; 
+    }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
@@ -21,8 +24,8 @@ st.markdown("""
         margin-bottom: 0.2rem !important;
     }
     .ctrl-container .stButton>button {
-        padding: 0.55rem 0.1rem !important;
-        font-size: 0.88rem !important;
+        padding: 0.5rem 0.1rem !important;
+        font-size: 0.85rem !important;
         font-weight: bold !important;
         width: 100% !important;
     }
@@ -400,17 +403,17 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🎯 [핵심] 스마트폰에서 무조건 가로 4등분 한 줄로 고정되는 순수 HTML/JS 버튼
+    # 🎯 [수정된 부분] 세로 패딩을 12px -> 6px 로 줄여 높이를 기존의 2/3 수준으로 축소
     st.components.v1.html(
         """
         <div style="display:flex; flex-direction:row; width:100%; gap:4px; margin:0; padding:0;">
-            <button onclick="window.parent.location.href='?sel_val=우삼'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우삼</button>
-            <button onclick="window.parent.location.href='?sel_val=우사'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우사</button>
-            <button onclick="window.parent.location.href='?sel_val=좌삼'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌삼</button>
-            <button onclick="window.parent.location.href='?sel_val=좌사'" style="flex:1; padding:12px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌사</button>
+            <button onclick="window.parent.location.href='?sel_val=우삼'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우삼</button>
+            <button onclick="window.parent.location.href='?sel_val=우사'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">우사</button>
+            <button onclick="window.parent.location.href='?sel_val=좌삼'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌삼</button>
+            <button onclick="window.parent.location.href='?sel_val=좌사'" style="flex:1; padding:6px 0; font-size:15px; font-weight:bold; background:#fff; border:1px solid #ccc; border-radius:6px; cursor:pointer;">좌사</button>
         </div>
         """,
-        height=52
+        height=38
     )
 
     st.markdown("---")
