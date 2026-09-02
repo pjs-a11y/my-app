@@ -18,7 +18,7 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 🎯 결과 입력 버튼: 모바일 무조건 가로 4등분 + 슬림한 높이(2/3 수준) */
+    /* 🎯 결과 입력 버튼: 스마트폰 화면 4등분(25% 너비) 확장 + 슬림한 높이/가로배치 유지 */
     div[data-testid="stSegmentedControl"] {
         width: 100% !important;
     }
@@ -26,11 +26,12 @@ st.markdown("""
         display: flex !important;
         flex-direction: row !important;
         width: 100% !important;
-        gap: 3px !important;
+        gap: 2px !important;
     }
     div[data-testid="stSegmentedControl"] button {
         flex: 1 1 25% !important;
         width: 25% !important;
+        max-width: 25% !important;
         min-width: 0px !important;
         padding: 0.3rem 0rem !important;
         font-size: 0.85rem !important;
@@ -404,7 +405,7 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 🎯 [핵심] 파이썬 내장 완벽 작동 + 모바일 슬림 가로 4등분 버튼
+    # 🎯 결과 입력 세그먼트 컨트롤 (너비 25% 가로 4등분 지정)
     input_val = st.segmented_control(
         label="결과 선택",
         options=ALL_COMBOS,
