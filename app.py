@@ -14,7 +14,7 @@ st.markdown("""
     .block-container { padding: 0.5rem 0.6rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.82rem !important; line-height: 1.35 !important; }
-    .stButton>button { padding: 0.35rem 0.05rem !important; font-size: 0.82rem !important; font-weight: bold; }
+    .stButton>button { padding: 0.4rem 0.05rem !important; font-size: 0.85rem !important; font-weight: bold; width: 100% !important; }
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -369,6 +369,7 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
+    # 🟢 결과 입력 가로 배치 (4컬럼 한 줄)
     c1, c2, c3, c4 = st.columns(4)
     b_um = c1.button("우삼", use_container_width=True)
     b_us = c2.button("우사", use_container_width=True)
@@ -390,6 +391,7 @@ else:
 
     st.markdown("---")
 
+    # 🟢 제어 기능 버튼 가로 배치 (4컬럼 한 줄)
     m1, m2, m3, m4 = st.columns(4)
     if m1.button("패스", use_container_width=True):
         push_backup()
