@@ -51,6 +51,21 @@ st.markdown("""
         width: 100% !important;
     }
 
+    /* 📥 다운로드 버튼 전용 스타일 */
+    .ctrl-container div[data-testid="stDownloadButton"] {
+        width: 100% !important;
+        margin-bottom: 0.2rem !important;
+    }
+    .ctrl-container div[data-testid="stDownloadButton"]>button {
+        padding: 0.5rem 0.1rem !important;
+        font-size: 0.88rem !important;
+        font-weight: bold !important;
+        width: 100% !important;
+        background-color: #28a745 !important;
+        color: white !important;
+        border: none !important;
+    }
+
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
 </style>
 """, unsafe_allow_html=True)
@@ -279,18 +294,19 @@ if st.session_state.show_bulk:
         st.session_state.show_bulk = False
         st.rerun()
 
-# 2. 최초 데이터 없을 때
+# 2. 최초 데이터 없을 때 (초기화 또는 첫 실행 시)
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
     init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
     
-    col1, col2, col3, col4 = st.columns(4)
-    sel = None
-    if col1.button("우삼"): sel = "우삼"
-    elif col2.button("우사"): sel = "우사"
-    elif col3.button("좌삼"): sel = "좌삼"
-    elif col4.button("좌사"): sel = "좌사"
+    sel = st.segmented_control(
+        label="첫 결과 선택",
+        options=ALL_COMBOS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        key="init_seg_ctrl"
+    )
 
     if sel:
         push_backup()
@@ -454,6 +470,19 @@ else:
             save_data(st.session_state.records)
             st.cache_data.clear()
             st.rerun()
+
+    # 📥 [신규 기능 추가] 현재까지 쌓인 전체 데이터를 TXT 파일로 스마트폰에 바로 저장하는 버튼
+    export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
+    export_text = "\n".join(export_lines)
+    
+    st.download_button(
+        label="📥 현재 누적 데이터 TXT 다운로드 (백업)",
+        data=export_text,
+        file_name=f"ladder_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
+        mime="text/plain",
+        use_container_width=True,
+        key="btn_download"
+    )
     st.markdown('</div>', unsafe_allow_html=True)
 
     st.markdown("---")
