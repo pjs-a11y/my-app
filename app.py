@@ -471,13 +471,14 @@ else:
             st.cache_data.clear()
             st.rerun()
 
-    # 📥 현재까지 쌓인 전체 데이터를 TXT 파일로 스마트폰에 다운로드하는 버튼
+    # 📥 한글 깨짐 방지 인코딩(UTF-8-SIG)이 적용된 TXT 백업 다운로드 버튼
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
     export_text = "\n".join(export_lines)
+    export_bytes = export_text.encode("utf-8-sig")
     
     st.download_button(
         label="📥 현재 누적 데이터 TXT 다운로드 (백업)",
-        data=export_text,
+        data=export_bytes,
         file_name=f"ladder_backup_{datetime.now().strftime('%Y%m%d_%H%M%S')}.txt",
         mime="text/plain",
         use_container_width=True,
