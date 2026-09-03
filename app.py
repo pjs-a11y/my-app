@@ -471,7 +471,7 @@ else:
             st.cache_data.clear()
             st.rerun()
 
-    # 📥 [신규 기능 추가] 현재까지 쌓인 전체 데이터를 TXT 파일로 스마트폰에 바로 저장하는 버튼
+    # 📥 현재까지 쌓인 전체 데이터를 TXT 파일로 스마트폰에 다운로드하는 버튼
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
     export_text = "\n".join(export_lines)
     
