@@ -94,12 +94,12 @@ ITEM_FULL_MAP = {
     '우사': '우사짝',
     '우삼': '우삼홀',
     '좌사': '좌사홀',
-    '좌삼': '좌삼짝'
+    '좌삼': '좌사짝'
 }
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 무제한 로드 (Range Query 사용)
+# DB 분할 조회를 통한 무제한 로드
 def load_data():
     if not supabase:
         return []
@@ -126,12 +126,10 @@ def load_data():
     except Exception:
         return []
 
-# 💡 수정: RLS 차단을 우회하여 3,168개+ 데이터를 DB에 확실히 저장하는 재동기화 함수
 def sync_all_records_db(records):
     if not supabase:
         return
     try:
-        # 안전한 기존 ID 수집 및 배치 삭제
         fetch_ids = supabase.table("ladder_records").select("id").execute()
         if fetch_ids and fetch_ids.data:
             id_list = [r['id'] for r in fetch_ids.data]
@@ -139,7 +137,6 @@ def sync_all_records_db(records):
                 chunk_ids = id_list[i:i + 200]
                 supabase.table("ladder_records").delete().in_("id", chunk_ids).execute()
 
-        # 대량 배치 데이터 삽입 (전체 레코드 영구 저장)
         if records:
             bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in records]
             chunk_size = 100
@@ -195,7 +192,8 @@ def calculate_score_A_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_A_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
+    # 패턴 연산 속도 향상을 위해 직전 30개 데이터만 슬라이싱 참조
+    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
 
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -245,7 +243,8 @@ def calculate_score_B_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_B_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
+    # 패턴 연산 속도 향상을 위해 직전 30개 데이터만 슬라이싱 참조
+    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
 
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -266,7 +265,8 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ 통계 집계 함수
+# ⚡ [속도 최적화] 메모리 캐싱 적용된 통계 집계 함수
+@st.cache_data(show_spinner=False)
 def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
     else: eval_records = records_tuple
@@ -305,9 +305,9 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 실행 시 DB 전체 로드
-db_records = load_data()
-st.session_state.records = db_records
+# 앱 로드 시 DB 전체 데이터를 메모리에 캐싱
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
