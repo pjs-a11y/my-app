@@ -99,7 +99,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# 💡 DB 분할 로드 (3,000개 수량 제한 완전 제거)
+# DB 무제한 로드 (Range Query 사용)
 def load_data():
     if not supabase:
         return []
@@ -107,7 +107,7 @@ def load_data():
         all_records = []
         start = 0
         step = 1000
-        max_limit = 20000  # 무제한 확장 수집
+        max_limit = 20000
         
         while start < max_limit:
             res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).range(start, start + step - 1).execute()
@@ -126,12 +126,20 @@ def load_data():
     except Exception:
         return []
 
-# 💡 DB 동기화 함수에서도 3,000개 잘라내는 제한 완전 삭제!
+# 💡 수정: RLS 차단을 우회하여 3,168개+ 데이터를 DB에 확실히 저장하는 재동기화 함수
 def sync_all_records_db(records):
     if not supabase:
         return
     try:
-        supabase.table("ladder_records").delete().neq("id", -1).execute()
+        # 안전한 기존 ID 수집 및 배치 삭제
+        fetch_ids = supabase.table("ladder_records").select("id").execute()
+        if fetch_ids and fetch_ids.data:
+            id_list = [r['id'] for r in fetch_ids.data]
+            for i in range(0, len(id_list), 200):
+                chunk_ids = id_list[i:i + 200]
+                supabase.table("ladder_records").delete().in_("id", chunk_ids).execute()
+
+        # 대량 배치 데이터 삽입 (전체 레코드 영구 저장)
         if records:
             bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in records]
             chunk_size = 100
@@ -258,7 +266,7 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ 통계 집계 함수 (전체 / 최근 3000개 분리 연산)
+# ⚡ 통계 집계 함수
 def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
     else: eval_records = records_tuple
@@ -297,7 +305,7 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 실행 시 DB의 전체 레코드 로드
+# 실행 시 DB 전체 로드
 db_records = load_data()
 st.session_state.records = db_records
 
@@ -343,7 +351,7 @@ if st.session_state.show_bulk:
         st.session_state.show_bulk = False
         st.rerun()
 
-# 2. 최초 데이터 없을 때 (초기화 또는 첫 실행 시)
+# 2. 최초 데이터 없을 때
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
@@ -385,7 +393,7 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 통계 (전체 3,168개+ 모수 연산)
+    # 1. 전체 누적 통계
     all_stat = calculate_ab_stats(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
@@ -398,7 +406,7 @@ else:
 
     st.markdown("---")
 
-    # 2. 최근 3000개 누적 통계 (최근 3,000개 슬라이싱 연산)
+    # 2. 최근 3000개 누적 통계
     recent_stat = calculate_ab_stats(records_tuple, limit_recent=3000)
     recent_cnt = min(len(records), 3000)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
