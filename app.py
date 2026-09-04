@@ -23,7 +23,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# 모바일 여백, 가로 4등분 세그먼트 컨트롤 높이(2/3 축소) 및 하단 여백 CSS
+# CSS 스타일
 st.markdown("""
 <style>
     .block-container { 
@@ -101,23 +101,40 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 안전 입출력 함수 (새로고침 방어 보완)
+# 💡 안전성이 검증된 DB 분할 조회 함수 (안전 탈출 조건 보장)
 def load_data():
     if not supabase:
         return []
     try:
-        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).execute()
-        if res.data:
-            return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in res.data]
+        all_records = []
+        start = 0
+        step = 1000
+        max_limit = 5000  # 최대 5,000개까지 안전 수집
+        
+        while start < max_limit:
+            res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).range(start, start + step - 1).execute()
+            if res and res.data:
+                all_records.extend(res.data)
+                if len(res.data) < step:
+                    break
+                start += step
+            else:
+                break
+                
+        if all_records:
+            sorted_records = sorted(all_records, key=lambda x: int(x['id']))
+            return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in sorted_records]
         return []
     except Exception:
         return []
 
+# 💡 안전한 DB 전체 삭제 및 재동기화 함수
 def sync_all_records_db(records):
     if not supabase:
         return
     try:
-        supabase.table("ladder_records").delete().gte("id", 0).execute()
+        # 안전한 조건 삭제 (Primary Key 전체 범위 대상)
+        supabase.table("ladder_records").delete().neq("id", -1).execute()
         save_records = records[-MAX_DATA_SIZE:]
         if save_records:
             bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in save_records]
@@ -138,7 +155,7 @@ def delete_last_record_db():
     if supabase:
         try:
             res = supabase.table("ladder_records").select("id").order("id", desc=True).limit(1).execute()
-            if res.data:
+            if res and res.data:
                 last_id = res.data[0]['id']
                 supabase.table("ladder_records").delete().eq("id", last_id).execute()
         except Exception:
@@ -285,7 +302,7 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 💡 핵심 수정: 매번 DB 조회를 보장하도록 조건문 없이 항상 DB 최신 레코드 로드
+# 매번 DB 전체 조회를 보장하도록 설정
 db_records = load_data()
 st.session_state.records = db_records
 
