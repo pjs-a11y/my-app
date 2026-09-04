@@ -23,7 +23,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# CSS 스타일 (원본 스타일 복원)
+# CSS 스타일
 st.markdown("""
 <style>
     .block-container { 
@@ -100,14 +100,14 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# Supabase 데이터베이스 읽기/쓰기 (원본 구조 완벽 연결)
+# DB 데이터 로드 (ID 정렬 보장)
 def load_data_db():
     if not supabase:
         return []
     try:
         res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
         if res.data:
-            return sorted(res.data, key=lambda x: x['id'])
+            return sorted(res.data, key=lambda x: int(x['id']))
         return []
     except Exception:
         return []
@@ -151,7 +151,7 @@ def clear_all_records_db():
             pass
     return False
 
-# 원본 분석 엔진 로직
+# 분석 엔진 로직
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -286,11 +286,11 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
     return {
         'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
         'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
-        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0,
+        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_a > 0 else 0.0,
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 데이터베이스 연결 상태 확인
+# 데이터베이스 연결 경고
 if not supabase:
     st.warning("⚠️ Supabase 데이터베이스가 연동되지 않았습니다. Streamlit Secrets 설정을 확인해 주세요.")
 
@@ -335,7 +335,7 @@ if st.session_state.show_bulk:
         st.session_state.show_bulk = False
         st.rerun()
 
-# 2. 최초 데이터 없을 때 (원본 세그먼트 컨트롤)
+# 2. 최초 데이터 없을 때
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
@@ -354,7 +354,7 @@ elif not records:
             st.cache_data.clear()
             st.rerun()
 
-# 3. 메인 분석 화면 (원본 UI 레이아웃 100% 동일)
+# 3. 메인 분석 화면
 else:
     last_rec = records[-1]
     last_dt_obj = datetime.strptime(last_rec['date'], "%Y-%m-%d")
@@ -373,18 +373,37 @@ else:
 
     st.markdown("---")
 
-    # 원본 통계표출
+    # 전체, 오늘, 최근 3000개 통계 표출 복원
     all_stat = calculate_ab_stats_cached(records_tuple)
-    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
+    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
+    recent_3000_stat = calculate_ab_stats_cached(records_tuple, limit_recent=3000)
+
+    st.markdown("**📊 전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
 
+    # 오늘 통계
+    st.markdown("---")
+    st.markdown(f"**📅 오늘 데이터 통계 ({curr_date})**")
+    if today_stat and today_stat['tot_a'] > 0:
+        st.markdown(f"🅰️ **A 승률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 ({today_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 ({today_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("오늘 기록된 데이터가 아직 없습니다.")
+
+    # 최근 3000개 통계
+    st.markdown("---")
+    st.markdown("**⚡ 최근 3,000개 데이터 누적 통계**")
+    if recent_3000_stat and recent_3000_stat['tot_a'] > 0:
+        st.markdown(f"🅰️ **A 승률 : {recent_3000_stat['a_win']}승 {recent_3000_stat['a_lose']}패 ({recent_3000_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {recent_3000_stat['b_win']}승 {recent_3000_stat['b_lose']}패 ({recent_3000_stat['b_rate']:.1f}%)**")
+    else:
+        st.markdown("누적 데이터 수량이 부족합니다.")
+
     st.markdown("---")
 
-    # 예측 및 원본 세그먼트 컨트롤 입력 UI
+    # 이번회차 예측
     curr_a_res = analyze_A_engine_tuple(records_tuple)
     curr_b_res = analyze_B_engine_tuple(records_tuple)
 
@@ -397,7 +416,6 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 원본 가로 1줄 선택 위젯 (st.segmented_control)
     input_val = st.segmented_control(
         label="결과 선택",
         options=ALL_COMBOS,
@@ -413,7 +431,7 @@ else:
 
     st.markdown("---")
 
-    # 하단 제어 버튼 (원본 레이아웃)
+    # 하단 제어 버튼
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         if add_single_record_db(curr_date, next_round, "PASS"):
