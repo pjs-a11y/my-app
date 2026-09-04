@@ -26,14 +26,12 @@ supabase = init_supabase()
 # 모바일 여백, 가로 4등분 세그먼트 컨트롤 높이(2/3 축소) 및 하단 여백 CSS
 st.markdown("""
 <style>
-    /* 우측 하단 검정 버튼(Manage app) 방해 방지용 하단 여백 80px */
     .block-container { 
         padding: 0.3rem 0.3rem 80px 0.3rem !important; 
     }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 🎯 결과 입력 버튼: 스마트폰 화면 4등분(25% 너비) 확장 + 슬림한 높이/가로배치 유지 */
     div[data-testid="stSegmentedControl"] {
         width: 100% !important;
     }
@@ -54,7 +52,6 @@ st.markdown("""
         height: 38px !important;
     }
 
-    /* 🎯 하단 제어 버튼: 세로 큼직한 버튼 */
     .ctrl-container .stButton {
         width: 100% !important;
         margin-bottom: 0.2rem !important;
@@ -66,7 +63,6 @@ st.markdown("""
         width: 100% !important;
     }
 
-    /* 📥 다운로드 버튼 전용 스타일 */
     .ctrl-container div[data-testid="stDownloadButton"] {
         width: 100% !important;
         margin-bottom: 0.2rem !important;
@@ -105,7 +101,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# Supabase DB 입출력 함수
+# DB 안전 입출력 함수 (새로고침 방어 보완)
 def load_data():
     if not supabase:
         return []
@@ -289,9 +285,9 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 💡 안전한 세션 상태 초기화 (최초 세션 생성 시에만 DB 동기화하여 버튼 씹힘 방지)
-if "records" not in st.session_state:
-    st.session_state.records = load_data()
+# 💡 핵심 수정: 매번 DB 조회를 보장하도록 조건문 없이 항상 DB 최신 레코드 로드
+db_records = load_data()
+st.session_state.records = db_records
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
