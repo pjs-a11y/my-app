@@ -1,5 +1,6 @@
 import os
 import re
+import copy
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
@@ -22,15 +23,17 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# CSS 스타일 (원본 100% 복원)
+# 모바일 여백, 가로 4등분 세그먼트 컨트롤 높이(2/3 축소) 및 하단 여백 CSS
 st.markdown("""
 <style>
+    /* 우측 하단 검정 버튼(Manage app) 방해 방지용 하단 여백 80px */
     .block-container { 
         padding: 0.3rem 0.3rem 80px 0.3rem !important; 
     }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
+    /* 🎯 결과 입력 버튼: 스마트폰 화면 4등분(25% 너비) 확장 + 슬림한 높이/가로배치 유지 */
     div[data-testid="stSegmentedControl"] {
         width: 100% !important;
     }
@@ -51,6 +54,7 @@ st.markdown("""
         height: 38px !important;
     }
 
+    /* 🎯 하단 제어 버튼: 세로 큼직한 버튼 */
     .ctrl-container .stButton {
         width: 100% !important;
         margin-bottom: 0.2rem !important;
@@ -62,6 +66,7 @@ st.markdown("""
         width: 100% !important;
     }
 
+    /* 📥 다운로드 버튼 전용 스타일 */
     .ctrl-container div[data-testid="stDownloadButton"] {
         width: 100% !important;
         margin-bottom: 0.2rem !important;
@@ -81,6 +86,7 @@ st.markdown("""
 """, unsafe_allow_html=True)
 
 MAX_DATA_SIZE = 3000
+
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
 ITEM_MAP = {
@@ -99,61 +105,55 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 처리 함수
-def load_data_db():
+# 💡 안전한 Supabase DB 입출력 함수
+def load_data():
     if not supabase:
         return []
     try:
-        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).execute()
+        # DB에서 최신 3000개를 안전하게 추출한 후 id 순 정렬
+        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
         if res.data:
-            return res.data
+            sorted_data = sorted(res.data, key=lambda x: int(x['id']))
+            return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in sorted_data]
         return []
     except Exception:
         return []
 
+def sync_all_records_db(records):
+    """전체 초기화 및 대량 일괄 등록 시 사용"""
+    if not supabase:
+        return
+    try:
+        supabase.table("ladder_records").delete().gte("id", 0).execute()
+        save_records = records[-MAX_DATA_SIZE:]
+        if save_records:
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in save_records]
+            chunk_size = 100
+            for i in range(0, len(bulk_list), chunk_size):
+                supabase.table("ladder_records").insert(bulk_list[i:i + chunk_size]).execute()
+    except Exception:
+        pass
+
 def add_single_record_db(date_str, round_num, result_str):
+    """단건 추가 시 안전하게 insert"""
     if supabase:
         try:
             supabase.table("ladder_records").insert({"date": str(date_str), "round": int(round_num), "result": str(result_str)}).execute()
-            return True
         except Exception:
-            return False
-    return False
-
-def add_bulk_records_db(records_list):
-    if supabase and records_list:
-        try:
-            chunk_size = 100
-            for i in range(0, len(records_list), chunk_size):
-                chunk = records_list[i:i + chunk_size]
-                supabase.table("ladder_records").insert(chunk).execute()
-            return True
-        except Exception:
-            return False
-    return False
+            pass
 
 def delete_last_record_db():
+    """직전 1건 삭제"""
     if supabase:
         try:
             res = supabase.table("ladder_records").select("id").order("id", desc=True).limit(1).execute()
             if res.data:
                 last_id = res.data[0]['id']
                 supabase.table("ladder_records").delete().eq("id", last_id).execute()
-                return True
         except Exception:
             pass
-    return False
 
-def clear_all_records_db():
-    if supabase:
-        try:
-            supabase.table("ladder_records").delete().neq("id", -1).execute()
-            return True
-        except Exception:
-            pass
-    return False
-
-# 원본 연산 엔진
+# 🅰️ [A 엔진 연산]
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -204,6 +204,7 @@ def analyze_A_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
+# 🅱️ [B 엔진 연산]
 def calculate_score_B_engine(stream, val1, val2):
     n = len(stream)
     if n < 4: return {val1: 50.0, val2: 50.0}
@@ -253,10 +254,11 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
+# ⚡ 캐싱된 통계 집계 함수
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
-    if limit_recent: eval_records = list(records_tuple[-limit_recent:])
-    else: eval_records = list(records_tuple)
+    if limit_recent: eval_records = records_tuple[-limit_recent:]
+    else: eval_records = records_tuple
 
     n = len(eval_records)
     if n < 4: return None
@@ -268,9 +270,9 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
     for i in range(3, n):
         act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
-        if target_date and str(eval_records[i][0]).strip() != str(target_date).strip(): continue
+        if target_date and eval_records[i][0] != target_date: continue
 
-        past_sub = tuple(eval_records[:i])
+        past_sub = eval_records[:i]
         
         res_a = analyze_A_engine_tuple(past_sub)
         res_b = analyze_B_engine_tuple(past_sub)
@@ -292,14 +294,17 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 데이터베이스 연결 경고
-if not supabase:
-    st.warning("⚠️ Supabase 데이터베이스가 연동되지 않았습니다. Streamlit Secrets 설정을 확인해 주세요.")
-
+# 백업 상태 관리
+if "records" not in st.session_state: st.session_state.records = load_data()
+if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
-records = load_data_db()
-records_tuple = tuple((str(r['date']).strip(), int(r['round']), str(r['result']).strip()) for r in records)
+def push_backup():
+    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
+    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
+
+records = st.session_state.records
+records_tuple = tuple((r['date'], r['round'], r['result']) for r in records)
 
 # 1. 대량 입력 모드
 if st.session_state.show_bulk:
@@ -312,32 +317,28 @@ if st.session_state.show_bulk:
     if col_b1.button("📥 데이터 일괄 추가", use_container_width=True):
         found_items = re.findall(r'우사|우삼|좌사|좌삼', raw_text)
         if found_items:
+            push_backup()
             curr_rd = int(b_start_rd)
             curr_dt = b_date
-            bulk_list = []
             
             for item in found_items:
-                bulk_list.append({
-                    "date": curr_dt.strftime("%Y-%m-%d"),
-                    "round": curr_rd,
-                    "result": item
-                })
+                st.session_state.records.append({'date': curr_dt.strftime("%Y-%m-%d"), 'round': curr_rd, 'result': item})
                 curr_rd += 1
                 if curr_rd > 288:
                     curr_rd = 1
                     curr_dt = curr_dt + timedelta(days=1)
-            
-            if add_bulk_records_db(bulk_list):
-                st.cache_data.clear()
-                st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
-                st.session_state.show_bulk = False
-                st.rerun()
+                    
+            sync_all_records_db(st.session_state.records)
+            st.cache_data.clear()
+            st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
+            st.session_state.show_bulk = False
+            st.rerun()
 
     if col_b2.button("❌ 취소", use_container_width=True):
         st.session_state.show_bulk = False
         st.rerun()
 
-# 2. 최초 데이터 없을 때
+# 2. 최초 데이터 없을 때 (초기화 또는 첫 실행 시)
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
@@ -352,21 +353,25 @@ elif not records:
     )
 
     if sel:
-        if add_single_record_db(init_date.strftime("%Y-%m-%d"), int(init_round), sel):
-            st.cache_data.clear()
-            st.rerun()
+        push_backup()
+        dt_s = init_date.strftime("%Y-%m-%d")
+        rd_n = int(init_round)
+        st.session_state.records.append({'date': dt_s, 'round': rd_n, 'result': sel})
+        add_single_record_db(dt_s, rd_n, sel)
+        st.cache_data.clear()
+        st.rerun()
 
-# 3. 메인 분석 화면 (원본 100% 동일 표출)
+# 3. 메인 분석 화면
 else:
     last_rec = records[-1]
-    last_dt_obj = datetime.strptime(str(last_rec['date']).strip(), "%Y-%m-%d")
+    last_dt_obj = datetime.strptime(last_rec['date'], "%Y-%m-%d")
     
-    if int(last_rec['round']) >= 288:
+    if last_rec['round'] >= 288:
         next_round = 1
         curr_date = (last_dt_obj + timedelta(days=1)).strftime("%Y-%m-%d")
     else:
-        next_round = int(last_rec['round']) + 1
-        curr_date = str(last_rec['date']).strip()
+        next_round = last_rec['round'] + 1
+        curr_date = last_rec['date']
 
     st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
@@ -375,49 +380,99 @@ else:
 
     st.markdown("---")
 
-    # 원본 통계 표출
+    # 1. 전체 누적 통계
     all_stat = calculate_ab_stats_cached(records_tuple)
-    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
-    recent_3000_stat = calculate_ab_stats_cached(records_tuple, limit_recent=3000)
-
-    st.markdown("**📊 전체 누적 통계 (패스 회차 제외)**")
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
-
-    # 오늘 통계
-    st.markdown("---")
-    st.markdown(f"**📅 오늘 데이터 통계 ({curr_date})**")
-    if today_stat and today_stat['tot_a'] > 0:
-        st.markdown(f"🅰️ **A 승률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 ({today_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 ({today_stat['b_rate']:.1f}%)**")
     else:
-        st.markdown("오늘 기록된 데이터가 아직 없습니다.")
+        st.markdown("데이터 축적 중...")
 
-    # 최근 3000개 통계
     st.markdown("---")
-    st.markdown("**⚡ 최근 3,000개 데이터 누적 통계**")
-    if recent_3000_stat and recent_3000_stat['tot_a'] > 0:
-        st.markdown(f"🅰️ **A 승률 : {recent_3000_stat['a_win']}승 {recent_3000_stat['a_lose']}패 ({recent_3000_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {recent_3000_stat['b_win']}승 {recent_3000_stat['b_lose']}패 ({recent_3000_stat['b_rate']:.1f}%)**")
+
+    # 2. 최근 3000개 누적 통계
+    recent_stat = calculate_ab_stats_cached(records_tuple, limit_recent=MAX_DATA_SIZE)
+    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    if recent_stat:
+        st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
     else:
-        st.markdown("누적 데이터 수량이 부족합니다.")
+        st.markdown("데이터 축적 중...")
 
     st.markdown("---")
 
-    # 원본 지울픽(Worst) 포함 추천 예측 표출 100% 복원
+    # 3. 오늘 누적 통계
+    try:
+        dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
+        w_str = WEEKDAYS[dt_obj.weekday()]
+    except Exception:
+        w_str = ""
+
+    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
+    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
+    if today_stat:
+        st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
+    else:
+        st.markdown("데이터 축적 중...")
+
+    st.markdown("---")
+
+    # 4. 직전 회차 결과
+    if len(records_tuple) >= 4:
+        prev_sub = records_tuple[:-1]
+        prev_a_res = analyze_A_engine_tuple(prev_sub)
+        prev_b_res = analyze_B_engine_tuple(prev_sub)
+        prev_actual = last_rec['result']
+        
+        st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
+        if prev_actual == "PASS":
+            st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
+        else:
+            act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
+            
+            a_ok = "추천적중 🎯" if prev_a_res and prev_a_res['top'] == prev_actual else "추천미적중"
+            a_avoid_ok = "안나옴 성공 🎯" if prev_a_res and prev_a_res['worst'] != prev_actual else "나와버림 ❌"
+
+            b_ok = "추천적중 🎯" if prev_b_res and prev_b_res['top'] == prev_actual else "추천미적중"
+            b_avoid_ok = "안나옴 성공 🎯" if prev_b_res and prev_b_res['worst'] != prev_actual else "나와버림 ❌"
+
+            st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
+            if prev_a_res:
+                st.markdown(f"🅰️ **A 추천 ({prev_a_res['top']}) ➔ {a_ok}** / **지울픽 ({prev_a_res['worst']}) ➔ {a_avoid_ok}**")
+            if prev_b_res:
+                st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {b_avoid_ok}**")
+
+    st.markdown("---")
+
+    # 5. 이번회차 A/B 예측 추천 표출
     curr_a_res = analyze_A_engine_tuple(records_tuple)
     curr_b_res = analyze_B_engine_tuple(records_tuple)
 
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
+    
     if curr_a_res:
-        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%` / ⚠️ **지울픽: `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
+        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
+        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
+    
+    st.markdown(" ")
+    
     if curr_b_res:
-        st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%` / ⚠️ **지울픽: `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
+        st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
+        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
 
+    # 🎯 결과 입력 세그먼트 컨트롤
     input_val = st.segmented_control(
         label="결과 선택",
         options=ALL_COMBOS,
@@ -427,34 +482,50 @@ else:
     )
 
     if input_val:
-        if add_single_record_db(curr_date, next_round, input_val):
-            st.cache_data.clear()
-            st.rerun()
+        push_backup()
+        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
+        add_single_record_db(curr_date, next_round, input_val)
+        st.cache_data.clear()
+        st.rerun()
 
     st.markdown("---")
 
-    # 하단 제어 버튼 (되돌리기 등 정상 작동)
+    # 🟢 [하단 제어 기능]
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
-        if add_single_record_db(curr_date, next_round, "PASS"):
-            st.cache_data.clear()
-            st.rerun()
+        push_backup()
+        st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
+        add_single_record_db(curr_date, next_round, "PASS")
+        st.cache_data.clear()
+        st.toast(f"{next_round}회차 패스")
+        st.rerun()
 
-    if st.button("직전취소 (되돌리기)", use_container_width=True, key="btn_cancel"):
-        if delete_last_record_db():
+    if st.button("직전취소", use_container_width=True, key="btn_cancel"):
+        if st.session_state.records:
+            push_backup()
+            st.session_state.records.pop()
+            delete_last_record_db()
             st.cache_data.clear()
-            st.toast("직전 기록이 취소(되돌리기) 되었습니다.")
             st.rerun()
 
     if st.button("초기화", use_container_width=True, key="btn_reset"):
-        if clear_all_records_db():
+        push_backup()
+        st.session_state.records = []
+        sync_all_records_db([])
+        st.cache_data.clear()
+        st.rerun()
+
+    if st.button("되돌리기", use_container_width=True, key="btn_undo"):
+        if st.session_state.history_stack:
+            st.session_state.records = st.session_state.history_stack.pop()
+            sync_all_records_db(st.session_state.records)
             st.cache_data.clear()
-            st.toast("전체 데이터가 초기화되었습니다.")
             st.rerun()
 
-    # TXT 백업 다운로드
+    # 📥 한글 깨짐 방지 인코딩(UTF-8-SIG)이 적용된 TXT 백업 다운로드 버튼
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
-    export_bytes = "\n".join(export_lines).encode("utf-8-sig")
+    export_text = "\n".join(export_lines)
+    export_bytes = export_text.encode("utf-8-sig")
     
     st.download_button(
         label="📥 현재 누적 데이터 TXT 다운로드 (백업)",
@@ -465,3 +536,42 @@ else:
         key="btn_download"
     )
     st.markdown('</div>', unsafe_allow_html=True)
+
+    st.markdown("---")
+
+    # 6. 당일 세부 결과 전체 표출
+    st.markdown("**오늘 세부 결과 (A/B 적중 리스트)**")
+    if len(records_tuple) >= 4:
+        rows = []
+        today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
+        
+        for i in reversed(today_indices):
+            if i < 3: continue
+            p_sub = records_tuple[:i]
+            res_a_prev = analyze_A_engine_tuple(p_sub)
+            res_b_prev = analyze_B_engine_tuple(p_sub)
+            act_item = records_tuple[i][2]
+            rd_num = records_tuple[i][1]
+            
+            if act_item == "PASS":
+                continue
+
+            act_full = ITEM_FULL_MAP.get(act_item, act_item)
+
+            a_match = "적중 🎯" if res_a_prev and res_a_prev['top'] == act_item else "미적중"
+            b_match = "적중 🎯" if res_b_prev and res_b_prev['top'] == act_item else "미적중"
+
+            rows.append({
+                "회차": f"{rd_num}회",
+                "실제 결과": f"{act_item} ({act_full})",
+                "A 추천/지울픽": f"{res_a_prev['top']} / {res_a_prev['worst']}" if res_a_prev else "-",
+                "A 적중": a_match,
+                "B 추천/지울픽": f"{res_b_prev['top']} / {res_b_prev['worst']}" if res_b_prev else "-",
+                "B 적중": b_match
+            })
+        
+        if rows:
+            df = pd.DataFrame(rows)
+            st.dataframe(df, hide_index=True, use_container_width=True)
+        else:
+            st.markdown("오늘 유효한 회차가 없습니다.")
