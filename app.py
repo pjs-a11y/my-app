@@ -105,22 +105,19 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# 💡 안전한 Supabase DB 입출력 함수
+# Supabase DB 입출력 함수
 def load_data():
     if not supabase:
         return []
     try:
-        # DB에서 최신 3000개를 안전하게 추출한 후 id 순 정렬
-        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
+        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).execute()
         if res.data:
-            sorted_data = sorted(res.data, key=lambda x: int(x['id']))
-            return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in sorted_data]
+            return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in res.data]
         return []
     except Exception:
         return []
 
 def sync_all_records_db(records):
-    """전체 초기화 및 대량 일괄 등록 시 사용"""
     if not supabase:
         return
     try:
@@ -135,7 +132,6 @@ def sync_all_records_db(records):
         pass
 
 def add_single_record_db(date_str, round_num, result_str):
-    """단건 추가 시 안전하게 insert"""
     if supabase:
         try:
             supabase.table("ladder_records").insert({"date": str(date_str), "round": int(round_num), "result": str(result_str)}).execute()
@@ -143,7 +139,6 @@ def add_single_record_db(date_str, round_num, result_str):
             pass
 
 def delete_last_record_db():
-    """직전 1건 삭제"""
     if supabase:
         try:
             res = supabase.table("ladder_records").select("id").order("id", desc=True).limit(1).execute()
@@ -294,8 +289,10 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 백업 상태 관리
-if "records" not in st.session_state: st.session_state.records = load_data()
+# 💡 안전한 세션 상태 초기화 (최초 세션 생성 시에만 DB 동기화하여 버튼 씹힘 방지)
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
+
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
