@@ -1,6 +1,5 @@
 import os
 import re
-import copy
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
@@ -98,16 +97,15 @@ ITEM_FULL_MAP = {
     '좌삼': '좌삼짝'
 }
 
-WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
-
-# DB 데이터 로드 (ID 정렬 보장)
+# DB 데이터 로드 (전체 개수 제한 없이 누적데이터 통회차 로드)
 def load_data_db():
     if not supabase:
         return []
     try:
-        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
+        # DB 제한을 없애고 전체 데이터를 순서대로 가져옴
+        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).execute()
         if res.data:
-            return sorted(res.data, key=lambda x: int(x['id']))
+            return res.data
         return []
     except Exception:
         return []
@@ -115,7 +113,7 @@ def load_data_db():
 def add_single_record_db(date_str, round_num, result_str):
     if supabase:
         try:
-            supabase.table("ladder_records").insert({"date": date_str, "round": round_num, "result": result_str}).execute()
+            supabase.table("ladder_records").insert({"date": str(date_str), "round": int(round_num), "result": str(result_str)}).execute()
             return True
         except Exception:
             return False
@@ -124,7 +122,11 @@ def add_single_record_db(date_str, round_num, result_str):
 def add_bulk_records_db(records_list):
     if supabase and records_list:
         try:
-            supabase.table("ladder_records").insert(records_list).execute()
+            # 100개씩 분할하여 DB 누락 없이 안전 입력
+            chunk_size = 100
+            for i in range(0, len(records_list), chunk_size):
+                chunk = records_list[i:i + chunk_size]
+                supabase.table("ladder_records").insert(chunk).execute()
             return True
         except Exception:
             return False
@@ -145,13 +147,13 @@ def delete_last_record_db():
 def clear_all_records_db():
     if supabase:
         try:
-            supabase.table("ladder_records").delete().gte("id", 0).execute()
+            supabase.table("ladder_records").delete().neq("id", -1).execute()
             return True
         except Exception:
             pass
     return False
 
-# 분석 엔진 로직
+# 원본 분석 엔진
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -253,8 +255,8 @@ def analyze_B_engine_tuple(records_tuple):
 
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
-    if limit_recent: eval_records = records_tuple[-limit_recent:]
-    else: eval_records = records_tuple
+    if limit_recent: eval_records = list(records_tuple[-limit_recent:])
+    else: eval_records = list(records_tuple)
 
     n = len(eval_records)
     if n < 4: return None
@@ -266,9 +268,9 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
     for i in range(3, n):
         act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
-        if target_date and eval_records[i][0] != target_date: continue
+        if target_date and str(eval_records[i][0]).strip() != str(target_date).strip(): continue
 
-        past_sub = eval_records[:i]
+        past_sub = tuple(eval_records[:i])
         
         res_a = analyze_A_engine_tuple(past_sub)
         res_b = analyze_B_engine_tuple(past_sub)
@@ -286,18 +288,18 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
     return {
         'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
         'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
-        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_a > 0 else 0.0,
+        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0,
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 데이터베이스 연결 경고
+# DB 연결 체크
 if not supabase:
     st.warning("⚠️ Supabase 데이터베이스가 연동되지 않았습니다. Streamlit Secrets 설정을 확인해 주세요.")
 
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
 records = load_data_db()
-records_tuple = tuple((r['date'], r['round'], r['result']) for r in records)
+records_tuple = tuple((str(r['date']).strip(), int(r['round']), str(r['result']).strip()) for r in records)
 
 # 1. 대량 입력 모드
 if st.session_state.show_bulk:
@@ -357,14 +359,14 @@ elif not records:
 # 3. 메인 분석 화면
 else:
     last_rec = records[-1]
-    last_dt_obj = datetime.strptime(last_rec['date'], "%Y-%m-%d")
+    last_dt_obj = datetime.strptime(str(last_rec['date']).strip(), "%Y-%m-%d")
     
-    if last_rec['round'] >= 288:
+    if int(last_rec['round']) >= 288:
         next_round = 1
         curr_date = (last_dt_obj + timedelta(days=1)).strftime("%Y-%m-%d")
     else:
-        next_round = last_rec['round'] + 1
-        curr_date = last_rec['date']
+        next_round = int(last_rec['round']) + 1
+        curr_date = str(last_rec['date']).strip()
 
     st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
@@ -373,7 +375,7 @@ else:
 
     st.markdown("---")
 
-    # 전체, 오늘, 최근 3000개 통계 표출 복원
+    # 원본 통계 표출
     all_stat = calculate_ab_stats_cached(records_tuple)
     today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
     recent_3000_stat = calculate_ab_stats_cached(records_tuple, limit_recent=3000)
@@ -393,7 +395,7 @@ else:
     else:
         st.markdown("오늘 기록된 데이터가 아직 없습니다.")
 
-    # 최근 3000개 통계
+    # 최근 3,000개 통계
     st.markdown("---")
     st.markdown("**⚡ 최근 3,000개 데이터 누적 통계**")
     if recent_3000_stat and recent_3000_stat['tot_a'] > 0:
@@ -431,7 +433,7 @@ else:
 
     st.markdown("---")
 
-    # 하단 제어 버튼
+    # 제어 버튼
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         if add_single_record_db(curr_date, next_round, "PASS"):
@@ -448,7 +450,7 @@ else:
             st.cache_data.clear()
             st.rerun()
 
-    # TXT 다운로드 백업
+    # TXT 백업 다운로드
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
     export_bytes = "\n".join(export_lines).encode("utf-8-sig")
     
