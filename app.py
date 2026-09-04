@@ -1,5 +1,6 @@
 import os
 import re
+import copy
 import pandas as pd
 import streamlit as st
 from datetime import datetime, timedelta
@@ -22,7 +23,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# CSS 스타일 (기존 UI 레이아웃 유지를 위한 스타일)
+# CSS 스타일 (원본 스타일 복원)
 st.markdown("""
 <style>
     .block-container { 
@@ -97,7 +98,9 @@ ITEM_FULL_MAP = {
     '좌삼': '좌삼짝'
 }
 
-# DB 데이터 로드 (최신 3000개 안전 정렬)
+WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+
+# Supabase 데이터베이스 읽기/쓰기 (원본 구조 완벽 연결)
 def load_data_db():
     if not supabase:
         return []
@@ -118,7 +121,6 @@ def add_single_record_db(date_str, round_num, result_str):
             return False
     return False
 
-# 💡 대량 데이터 전송 성능 개선 (Bulk Insert)
 def add_bulk_records_db(records_list):
     if supabase and records_list:
         try:
@@ -149,7 +151,7 @@ def clear_all_records_db():
             pass
     return False
 
-# 분석 엔진 로직
+# 원본 분석 엔진 로직
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -288,7 +290,7 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 데이터베이스 연결 경고
+# 데이터베이스 연결 상태 확인
 if not supabase:
     st.warning("⚠️ Supabase 데이터베이스가 연동되지 않았습니다. Streamlit Secrets 설정을 확인해 주세요.")
 
@@ -333,21 +335,26 @@ if st.session_state.show_bulk:
         st.session_state.show_bulk = False
         st.rerun()
 
-# 2. 최초 데이터 없을 때
+# 2. 최초 데이터 없을 때 (원본 세그먼트 컨트롤)
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
     init_date = st.date_input("날짜 선택", datetime.now())
     init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
     
-    col1, col2, col3, col4 = st.columns(4)
-    btns = [col1.button("우삼"), col2.button("우사"), col3.button("좌삼"), col4.button("좌사")]
-    for idx, btn in enumerate(btns):
-        if btn:
-            if add_single_record_db(init_date.strftime("%Y-%m-%d"), int(init_round), ALL_COMBOS[idx]):
-                st.cache_data.clear()
-                st.rerun()
+    sel = st.segmented_control(
+        label="첫 결과 선택",
+        options=ALL_COMBOS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        key="init_seg_ctrl"
+    )
 
-# 3. 메인 분석 화면
+    if sel:
+        if add_single_record_db(init_date.strftime("%Y-%m-%d"), int(init_round), sel):
+            st.cache_data.clear()
+            st.rerun()
+
+# 3. 메인 분석 화면 (원본 UI 레이아웃 100% 동일)
 else:
     last_rec = records[-1]
     last_dt_obj = datetime.strptime(last_rec['date'], "%Y-%m-%d")
@@ -366,29 +373,18 @@ else:
 
     st.markdown("---")
 
-    # 통계 표출
+    # 원본 통계표출
     all_stat = calculate_ab_stats_cached(records_tuple)
-    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
-    recent_3000_stat = calculate_ab_stats_cached(records_tuple, limit_recent=3000)
-
-    st.markdown("**📊 전체 누적 통계 (패스 회차 제외)**")
+    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
         st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
 
-    if today_stat and today_stat['tot_a'] > 0:
-        st.markdown(f"**📅 오늘 데이터 통계 ({curr_date})**")
-        st.markdown(f"🅰️ **A 승률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 ({today_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 ({today_stat['b_rate']:.1f}%)**")
-
-    if recent_3000_stat and recent_3000_stat['tot_a'] > 0:
-        st.markdown(f"**⚡ 최근 3,000개 데이터 누적 통계**")
-        st.markdown(f"🅰️ **A 승률 : {recent_3000_stat['a_win']}승 {recent_3000_stat['a_lose']}패 ({recent_3000_stat['a_rate']:.1f}%)** / 🅱️ **B 승률 : {recent_3000_stat['b_win']}승 {recent_3000_stat['b_lose']}패 ({recent_3000_stat['b_rate']:.1f}%)**")
-
     st.markdown("---")
 
-    # 이번회차 예측
+    # 예측 및 원본 세그먼트 컨트롤 입력 UI
     curr_a_res = analyze_A_engine_tuple(records_tuple)
     curr_b_res = analyze_B_engine_tuple(records_tuple)
 
@@ -401,18 +397,14 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 💡 세그먼트 컨트롤 무한 루프 버그 방지를 위해 4개 독립 버튼 컬럼으로 즉시 처리
-    c1, c2, c3, c4 = st.columns(4)
-    b_us = c1.button("우삼", use_container_width=True)
-    b_usa = c2.button("우사", use_container_width=True)
-    b_js = c3.button("좌삼", use_container_width=True)
-    b_jsa = c4.button("좌사", use_container_width=True)
-
-    input_val = None
-    if b_us: input_val = "우삼"
-    elif b_usa: input_val = "우사"
-    elif b_js: input_val = "좌삼"
-    elif b_jsa: input_val = "좌사"
+    # 원본 가로 1줄 선택 위젯 (st.segmented_control)
+    input_val = st.segmented_control(
+        label="결과 선택",
+        options=ALL_COMBOS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        key=f"seg_ctrl_{len(records)}"
+    )
 
     if input_val:
         if add_single_record_db(curr_date, next_round, input_val):
@@ -421,26 +413,24 @@ else:
 
     st.markdown("---")
 
-    # 제어 버튼
+    # 하단 제어 버튼 (원본 레이아웃)
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         if add_single_record_db(curr_date, next_round, "PASS"):
             st.cache_data.clear()
             st.rerun()
 
-    if st.button("직전취소 (되돌리기)", use_container_width=True, key="btn_cancel"):
+    if st.button("직전취소", use_container_width=True, key="btn_cancel"):
         if delete_last_record_db():
             st.cache_data.clear()
-            st.toast("직전 기록이 취소(되돌리기) 되었습니다.")
             st.rerun()
 
     if st.button("초기화", use_container_width=True, key="btn_reset"):
         if clear_all_records_db():
             st.cache_data.clear()
-            st.toast("전체 데이터가 초기화되었습니다.")
             st.rerun()
 
-    # TXT 백업 다운로드
+    # TXT 다운로드 백업
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
     export_bytes = "\n".join(export_lines).encode("utf-8-sig")
     
