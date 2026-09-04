@@ -22,7 +22,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# CSS 스타일
+# CSS 스타일 (원본 100% 복원)
 st.markdown("""
 <style>
     .block-container { 
@@ -97,12 +97,13 @@ ITEM_FULL_MAP = {
     '좌삼': '좌삼짝'
 }
 
-# DB 데이터 로드 (전체 개수 제한 없이 누적데이터 통회차 로드)
+WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
+
+# DB 처리 함수
 def load_data_db():
     if not supabase:
         return []
     try:
-        # DB 제한을 없애고 전체 데이터를 순서대로 가져옴
         res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).execute()
         if res.data:
             return res.data
@@ -122,7 +123,6 @@ def add_single_record_db(date_str, round_num, result_str):
 def add_bulk_records_db(records_list):
     if supabase and records_list:
         try:
-            # 100개씩 분할하여 DB 누락 없이 안전 입력
             chunk_size = 100
             for i in range(0, len(records_list), chunk_size):
                 chunk = records_list[i:i + chunk_size]
@@ -153,7 +153,7 @@ def clear_all_records_db():
             pass
     return False
 
-# 원본 분석 엔진
+# 원본 연산 엔진
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -292,7 +292,7 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# DB 연결 체크
+# 데이터베이스 연결 경고
 if not supabase:
     st.warning("⚠️ Supabase 데이터베이스가 연동되지 않았습니다. Streamlit Secrets 설정을 확인해 주세요.")
 
@@ -356,7 +356,7 @@ elif not records:
             st.cache_data.clear()
             st.rerun()
 
-# 3. 메인 분석 화면
+# 3. 메인 분석 화면 (원본 100% 동일 표출)
 else:
     last_rec = records[-1]
     last_dt_obj = datetime.strptime(str(last_rec['date']).strip(), "%Y-%m-%d")
@@ -395,7 +395,7 @@ else:
     else:
         st.markdown("오늘 기록된 데이터가 아직 없습니다.")
 
-    # 최근 3,000개 통계
+    # 최근 3000개 통계
     st.markdown("---")
     st.markdown("**⚡ 최근 3,000개 데이터 누적 통계**")
     if recent_3000_stat and recent_3000_stat['tot_a'] > 0:
@@ -405,15 +405,15 @@ else:
 
     st.markdown("---")
 
-    # 이번회차 예측
+    # 원본 지울픽(Worst) 포함 추천 예측 표출 100% 복원
     curr_a_res = analyze_A_engine_tuple(records_tuple)
     curr_b_res = analyze_B_engine_tuple(records_tuple)
 
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     if curr_a_res:
-        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
+        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%` / ⚠️ **지울픽: `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
     if curr_b_res:
-        st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
+        st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%` / ⚠️ **지울픽: `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -433,21 +433,23 @@ else:
 
     st.markdown("---")
 
-    # 제어 버튼
+    # 하단 제어 버튼 (되돌리기 등 정상 작동)
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         if add_single_record_db(curr_date, next_round, "PASS"):
             st.cache_data.clear()
             st.rerun()
 
-    if st.button("직전취소", use_container_width=True, key="btn_cancel"):
+    if st.button("직전취소 (되돌리기)", use_container_width=True, key="btn_cancel"):
         if delete_last_record_db():
             st.cache_data.clear()
+            st.toast("직전 기록이 취소(되돌리기) 되었습니다.")
             st.rerun()
 
     if st.button("초기화", use_container_width=True, key="btn_reset"):
         if clear_all_records_db():
             st.cache_data.clear()
+            st.toast("전체 데이터가 초기화되었습니다.")
             st.rerun()
 
     # TXT 백업 다운로드
