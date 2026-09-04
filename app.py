@@ -101,7 +101,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 분할 로드 (최대 1만 개까지 전체 제한 없이 안전 수집)
+# DB 분할 로드
 def load_data():
     if not supabase:
         return []
@@ -187,7 +187,6 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-# 💡 수정: 과거 데이터 슬라이싱 제한을 해제하여 전체 누적 통계 연산 허용
 def analyze_A_engine_tuple(records_tuple):
     valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
@@ -238,7 +237,6 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-# 💡 수정: 과거 데이터 슬라이싱 제한을 해제하여 전체 누적 통계 연산 허용
 def analyze_B_engine_tuple(records_tuple):
     valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
@@ -261,8 +259,7 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ 캐싱된 통계 집계 함수 (전체 / 최근 3000개 수량 구분 연산)
-@st.cache_data(show_spinner=False)
+# 💡 캐시 파기 처리된 실시간 통계 집계 함수
 def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
     else: eval_records = records_tuple
@@ -301,7 +298,7 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 실행 시 DB의 전체 레코드를 동기화
+# 실행 시 DB의 전체 레코드 로드
 db_records = load_data()
 st.session_state.records = db_records
 
@@ -389,7 +386,7 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 통계 (전체 3168개+ 데이터 통회차 연산)
+    # 1. 전체 누적 통계
     all_stat = calculate_ab_stats_cached(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
@@ -402,7 +399,7 @@ else:
 
     st.markdown("---")
 
-    # 2. 최근 3000개 누적 통계 (최근 3000개 슬라이싱 연산)
+    # 2. 최근 3000개 누적 통계
     recent_stat = calculate_ab_stats_cached(records_tuple, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
@@ -531,7 +528,7 @@ else:
             st.cache_data.clear()
             st.rerun()
 
-    # 📥 한글 깨짐 방지 인코딩(UTF-8-SIG)이 적용된 TXT 백업 다운로드 버튼
+    # 📥 백업 다운로드
     export_lines = [f"{r['date']}|{r['round']}|{r['result']}" for r in records]
     export_text = "\n".join(export_lines)
     export_bytes = export_text.encode("utf-8-sig")
