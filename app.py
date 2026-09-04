@@ -23,7 +23,7 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
-# CSS 스타일
+# 모바일 여백 CSS
 st.markdown("""
 <style>
     .block-container { 
@@ -101,7 +101,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# 💡 안전성이 검증된 DB 분할 조회 함수 (안전 탈출 조건 보장)
+# DB 분할 로드 (최대 1만 개까지 전체 제한 없이 안전 수집)
 def load_data():
     if not supabase:
         return []
@@ -109,7 +109,7 @@ def load_data():
         all_records = []
         start = 0
         step = 1000
-        max_limit = 5000  # 최대 5,000개까지 안전 수집
+        max_limit = 10000
         
         while start < max_limit:
             res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).range(start, start + step - 1).execute()
@@ -128,16 +128,13 @@ def load_data():
     except Exception:
         return []
 
-# 💡 안전한 DB 전체 삭제 및 재동기화 함수
 def sync_all_records_db(records):
     if not supabase:
         return
     try:
-        # 안전한 조건 삭제 (Primary Key 전체 범위 대상)
         supabase.table("ladder_records").delete().neq("id", -1).execute()
-        save_records = records[-MAX_DATA_SIZE:]
-        if save_records:
-            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in save_records]
+        if records:
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in records]
             chunk_size = 100
             for i in range(0, len(bulk_list), chunk_size):
                 supabase.table("ladder_records").insert(bulk_list[i:i + chunk_size]).execute()
@@ -190,8 +187,9 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
+# 💡 수정: 과거 데이터 슬라이싱 제한을 해제하여 전체 누적 통계 연산 허용
 def analyze_A_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple if r[2] in ALL_COMBOS][-MAX_DATA_SIZE:]
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
 
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -240,8 +238,9 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
+# 💡 수정: 과거 데이터 슬라이싱 제한을 해제하여 전체 누적 통계 연산 허용
 def analyze_B_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple if r[2] in ALL_COMBOS][-MAX_DATA_SIZE:]
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
 
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -262,7 +261,7 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ 캐싱된 통계 집계 함수
+# ⚡ 캐싱된 통계 집계 함수 (전체 / 최근 3000개 수량 구분 연산)
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
@@ -302,7 +301,7 @@ def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 매번 DB 전체 조회를 보장하도록 설정
+# 실행 시 DB의 전체 레코드를 동기화
 db_records = load_data()
 st.session_state.records = db_records
 
@@ -390,7 +389,7 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 통계
+    # 1. 전체 누적 통계 (전체 3168개+ 데이터 통회차 연산)
     all_stat = calculate_ab_stats_cached(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
@@ -403,7 +402,7 @@ else:
 
     st.markdown("---")
 
-    # 2. 최근 3000개 누적 통계
+    # 2. 최근 3000개 누적 통계 (최근 3000개 슬라이싱 연산)
     recent_stat = calculate_ab_stats_cached(records_tuple, limit_recent=MAX_DATA_SIZE)
     recent_cnt = min(len(records), MAX_DATA_SIZE)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
