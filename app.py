@@ -81,8 +81,6 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-MAX_DATA_SIZE = 3000
-
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
 ITEM_MAP = {
@@ -101,7 +99,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 분할 로드
+# 💡 DB 분할 로드 (3,000개 수량 제한 완전 제거)
 def load_data():
     if not supabase:
         return []
@@ -109,7 +107,7 @@ def load_data():
         all_records = []
         start = 0
         step = 1000
-        max_limit = 10000
+        max_limit = 20000  # 무제한 확장 수집
         
         while start < max_limit:
             res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).range(start, start + step - 1).execute()
@@ -128,6 +126,7 @@ def load_data():
     except Exception:
         return []
 
+# 💡 DB 동기화 함수에서도 3,000개 잘라내는 제한 완전 삭제!
 def sync_all_records_db(records):
     if not supabase:
         return
@@ -259,8 +258,8 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 💡 캐시 파기 처리된 실시간 통계 집계 함수
-def calculate_ab_stats_cached(records_tuple, target_date=None, limit_recent=None):
+# ⚡ 통계 집계 함수 (전체 / 최근 3000개 분리 연산)
+def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: eval_records = records_tuple[-limit_recent:]
     else: eval_records = records_tuple
 
@@ -386,8 +385,8 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 통계
-    all_stat = calculate_ab_stats_cached(records_tuple)
+    # 1. 전체 누적 통계 (전체 3,168개+ 모수 연산)
+    all_stat = calculate_ab_stats(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
@@ -399,9 +398,9 @@ else:
 
     st.markdown("---")
 
-    # 2. 최근 3000개 누적 통계
-    recent_stat = calculate_ab_stats_cached(records_tuple, limit_recent=MAX_DATA_SIZE)
-    recent_cnt = min(len(records), MAX_DATA_SIZE)
+    # 2. 최근 3000개 누적 통계 (최근 3,000개 슬라이싱 연산)
+    recent_stat = calculate_ab_stats(records_tuple, limit_recent=3000)
+    recent_cnt = min(len(records), 3000)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
@@ -420,7 +419,7 @@ else:
     except Exception:
         w_str = ""
 
-    today_stat = calculate_ab_stats_cached(records_tuple, target_date=curr_date)
+    today_stat = calculate_ab_stats(records_tuple, target_date=curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
