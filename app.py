@@ -81,6 +81,8 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+MAX_DATA_SIZE = 3000
+
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
 ITEM_MAP = {
@@ -99,49 +101,39 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 전체 로드
+# DB 로드 (최대 3,000개만)
 def load_data():
     if not supabase:
         return []
     try:
-        all_records = []
-        start = 0
-        step = 1000
-        max_limit = 20000
-        
-        while start < max_limit:
-            res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=False).range(start, start + step - 1).execute()
-            if res and res.data:
-                all_records.extend(res.data)
-                if len(res.data) < step:
-                    break
-                start += step
-            else:
-                break
-                
-        if all_records:
-            sorted_records = sorted(all_records, key=lambda x: int(x['id']))
+        res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
+        if res and res.data:
+            sorted_records = sorted(res.data, key=lambda x: int(x['id']))
             return [{'date': str(r['date']).strip(), 'round': int(r['round']), 'result': str(r['result']).strip()} for r in sorted_records]
         return []
     except Exception:
         return []
 
+# 💡 DB 동기화 시 3,000개 초과분 자동 삭제
 def sync_all_records_db(records):
     if not supabase:
         return
     try:
+        # 최근 3,000개만 남기고 이전 것 잘라내기
+        trimmed_records = records[-MAX_DATA_SIZE:]
+        
+        # 기존 DB 전체 비우기
         fetch_ids = supabase.table("ladder_records").select("id").execute()
         if fetch_ids and fetch_ids.data:
             id_list = [r['id'] for r in fetch_ids.data]
             for i in range(0, len(id_list), 200):
-                chunk_ids = id_list[i:i + 200]
-                supabase.table("ladder_records").delete().in_("id", chunk_ids).execute()
+                supabase.table("ladder_records").delete().in_("id", id_list[i:i + 200]).execute()
 
-        if records:
-            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in records]
-            chunk_size = 100
-            for i in range(0, len(bulk_list), chunk_size):
-                supabase.table("ladder_records").insert(bulk_list[i:i + chunk_size]).execute()
+        # 최근 3,000개만 다시 재저장
+        if trimmed_records:
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in trimmed_records]
+            for i in range(0, len(bulk_list), 100):
+                supabase.table("ladder_records").insert(bulk_list[i:i + 100]).execute()
     except Exception:
         pass
 
@@ -157,8 +149,7 @@ def delete_last_record_db():
         try:
             res = supabase.table("ladder_records").select("id").order("id", desc=True).limit(1).execute()
             if res and res.data:
-                last_id = res.data[0]['id']
-                supabase.table("ladder_records").delete().eq("id", last_id).execute()
+                supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception:
             pass
 
@@ -263,16 +254,9 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 🎯 [안정화 통계 연산]
-def calculate_ab_stats_clean(records_tuple, target_date=None, limit_recent=None):
-    if limit_recent:
-        eval_records = records_tuple[-limit_recent:]
-        offset = max(0, len(records_tuple) - limit_recent)
-    else:
-        eval_records = records_tuple
-        offset = 0
-
-    n = len(eval_records)
+# ⚡ 통계 연산
+def calculate_ab_stats_clean(records_tuple, target_date=None):
+    n = len(records_tuple)
     if n < 4: return None
 
     tot_a, tot_b = 0, 0
@@ -280,13 +264,11 @@ def calculate_ab_stats_clean(records_tuple, target_date=None, limit_recent=None)
     a_avoid_win, b_avoid_win = 0, 0
 
     for i in range(3, n):
-        act = eval_records[i][2]
+        act = records_tuple[i][2]
         if act not in ALL_COMBOS: continue
-        
-        # 특정 날짜 필터링
-        if target_date and eval_records[i][0] != target_date: continue
+        if target_date and records_tuple[i][0] != target_date: continue
 
-        past_sub = records_tuple[:offset + i]
+        past_sub = records_tuple[:i]
         res_a = analyze_A_engine_tuple(past_sub)
         res_b = analyze_B_engine_tuple(past_sub)
 
@@ -307,7 +289,7 @@ def calculate_ab_stats_clean(records_tuple, target_date=None, limit_recent=None)
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# DB 기반으로 세션 상태 초기화
+# 실행 시 최신 3000개만 DB에서 가져오기
 st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
@@ -341,7 +323,9 @@ if st.session_state.show_bulk:
                 if curr_rd > 288:
                     curr_rd = 1
                     curr_dt = curr_dt + timedelta(days=1)
-                    
+            
+            # 💡 입력 후 3,000개까지만 잘라서 DB 동기화
+            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
             st.cache_data.clear()
             st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
@@ -394,23 +378,10 @@ else:
 
     st.markdown("---")
 
-    # 1. 전체 누적 통계
-    all_stat = calculate_ab_stats_clean(records_tuple)
-    st.markdown("**전체 누적 통계 (패스 회차 제외)**")
-    if all_stat:
-        st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {all_stat['a_avoid_win']}승 {all_stat['a_avoid_lose']}패 (승률 {all_stat['a_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {all_stat['b_win']}승 {all_stat['b_lose']}패 (승률 {all_stat['b_rate']:.1f}%)**")
-        st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {all_stat['b_avoid_win']}승 {all_stat['b_avoid_lose']}패 (승률 {all_stat['b_avoid_rate']:.1f}%)**")
-    else:
-        st.markdown("데이터 축적 중...")
-
-    st.markdown("---")
-
-    # 2. 최근 3000개 누적 통계
-    recent_stat = calculate_ab_stats_clean(records_tuple, limit_recent=3000)
-    recent_cnt = min(len(records), 3000)
-    st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
+    # 1. 최근 3,000개 누적 통계
+    recent_stat = calculate_ab_stats_clean(records_tuple)
+    recent_cnt = len(records)
+    st.markdown(f"**누적 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
@@ -421,7 +392,7 @@ else:
 
     st.markdown("---")
 
-    # 3. 오늘 누적 통계
+    # 2. 오늘 누적 통계
     try:
         dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
         w_str = WEEKDAYS[dt_obj.weekday()]
@@ -440,7 +411,7 @@ else:
 
     st.markdown("---")
 
-    # 4. 직전 회차 결과
+    # 3. 직전 회차 결과
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
         prev_a_res = analyze_A_engine_tuple(prev_sub)
@@ -467,7 +438,7 @@ else:
 
     st.markdown("---")
 
-    # 5. 이번회차 A/B 예측 추천 표출
+    # 4. 이번회차 A/B 예측 추천 표출
     curr_a_res = analyze_A_engine_tuple(records_tuple)
     curr_b_res = analyze_B_engine_tuple(records_tuple)
 
@@ -498,7 +469,12 @@ else:
     if input_val:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
-        add_single_record_db(curr_date, next_round, input_val)
+        # 3000개 초과 시 자동 삭제 처리
+        if len(st.session_state.records) > MAX_DATA_SIZE:
+            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+            sync_all_records_db(st.session_state.records)
+        else:
+            add_single_record_db(curr_date, next_round, input_val)
         st.rerun()
 
     st.markdown("---")
@@ -508,7 +484,11 @@ else:
     if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
-        add_single_record_db(curr_date, next_round, "PASS")
+        if len(st.session_state.records) > MAX_DATA_SIZE:
+            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+            sync_all_records_db(st.session_state.records)
+        else:
+            add_single_record_db(curr_date, next_round, "PASS")
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
@@ -548,7 +528,7 @@ else:
 
     st.markdown("---")
 
-    # 6. 당일 세부 결과 전체 표출
+    # 5. 당일 세부 결과 전체 표출
     st.markdown("**오늘 세부 결과 (A/B 적중 리스트)**")
     if len(records_tuple) >= 4:
         rows = []
