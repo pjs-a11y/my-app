@@ -21,8 +21,15 @@ def init_supabase() -> Client:
 
 supabase = init_supabase()
 
+# 모바일 여백 & 당겨서 새로고침 차단 CSS
 st.markdown("""
 <style>
+    html, body {
+        overscroll-behavior-y: contain !important;
+    }
+    .stApp {
+        overscroll-behavior-y: none !important;
+    }
     .block-container { padding: 0.3rem 0.3rem 80px 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
@@ -106,17 +113,21 @@ def load_data():
         return []
     except Exception: return []
 
+# 💡 DB 강제 분할 삭제 (초기화 및 수량 잘라내기 누락 방지)
 def sync_all_records_db(records):
     if not supabase: return
     try:
-        trimmed_records = records[-MAX_DATA_SIZE:] if records else []
+        # DB의 모든 ID를 가져와 청크(Chunk) 단위로 확실히 삭제
         fetch_ids = supabase.table("ladder_records").select("id").execute()
         if fetch_ids and fetch_ids.data:
             id_list = [r['id'] for r in fetch_ids.data]
             for i in range(0, len(id_list), 200):
-                supabase.table("ladder_records").delete().in_("id", id_list[i:i + 200]).execute()
+                chunk_ids = id_list[i:i + 200]
+                supabase.table("ladder_records").delete().in_("id", chunk_ids).execute()
 
-        if trimmed_records:
+        # 남아있는 레코드가 있다면 3,000개 분량 재삽입
+        if records:
+            trimmed_records = records[-MAX_DATA_SIZE:]
             bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in trimmed_records]
             for i in range(0, len(bulk_list), 100):
                 supabase.table("ladder_records").insert(bulk_list[i:i + 100]).execute()
@@ -399,7 +410,7 @@ else:
             delete_last_record_db()
             st.rerun()
 
-    # 💡 [초기화 기능 완벽 보정] 클릭 즉시 로컬 세션 + DB 데이터 100% 삭제
+    # 💡 [핵심] DB 분할 삭제 적용으로 초기화 버튼 완벽 작동
     if st.button("초기화", use_container_width=True, key="btn_reset"):
         push_backup()
         st.session_state.records = []
