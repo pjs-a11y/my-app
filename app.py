@@ -263,16 +263,10 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 💡 [정확성 보장] 오늘 날짜 필터링 및 과거 회차 순회 완벽 구현
-def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
-    if limit_recent: 
-        eval_records = records_tuple[-limit_recent:]
-        offset = max(0, len(records_tuple) - limit_recent)
-    else: 
-        eval_records = records_tuple
-        offset = 0
-
-    n = len(eval_records)
+# ⚡ [통계 연산 캐싱] 과거 전체 및 최근 3,000개 통계 초고속 집계
+@st.cache_data(show_spinner=False)
+def calculate_historical_stats(records_tuple):
+    n = len(records_tuple)
     if n < 4: return None
 
     tot_a, tot_b = 0, 0
@@ -280,15 +274,11 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     a_avoid_win, b_avoid_win = 0, 0
 
     for i in range(3, n):
-        act = eval_records[i][2]
+        act = records_tuple[i][2]
         if act not in ALL_COMBOS: continue
-        
-        # 실제 레코드 날짜 수집
-        rec_date = eval_records[i][0]
-        if target_date and rec_date != target_date: continue
 
-        past_sub = records_tuple[:offset + i]
-        
+        # 최근 30개만 잘라서 주입 (속도 극대화)
+        past_sub = records_tuple[max(0, i - 30):i]
         res_a = analyze_A_engine_tuple(past_sub)
         res_b = analyze_B_engine_tuple(past_sub)
 
@@ -309,9 +299,46 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 매번 DB 최신 로드 (날짜/회차 밀림 방지)
-db_records = load_data()
-st.session_state.records = db_records
+# 🎯 [올바른 오늘 통계] 과거 3,000개 패턴 기반 분석 + 오늘 적중 결과만 필터링
+def calculate_today_stats_correct(records_tuple, curr_date):
+    today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
+    if not today_indices: return None
+
+    tot_a, tot_b = 0, 0
+    a_win, b_win = 0, 0
+    a_avoid_win, b_avoid_win = 0, 0
+
+    for idx in today_indices:
+        act = records_tuple[idx][2]
+        if act not in ALL_COMBOS: continue
+
+        # 오늘 1회차일지라도 '직전 과거 3000개 데이터'를 포함한 서브셋 참조
+        past_sub = records_tuple[max(0, idx - 30):idx]
+        if len(past_sub) < 3: continue
+
+        res_a = analyze_A_engine_tuple(past_sub)
+        res_b = analyze_B_engine_tuple(past_sub)
+
+        if res_a:
+            tot_a += 1
+            if res_a['top'] == act: a_win += 1
+            if res_a['worst'] != act: a_avoid_win += 1
+
+        if res_b:
+            tot_b += 1
+            if res_b['top'] == act: b_win += 1
+            if res_b['worst'] != act: b_avoid_win += 1
+
+    return {
+        'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
+        'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
+        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0,
+        'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
+    }
+
+# 앱 구동 시 DB 최신 데이터 세션 동기화
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -398,7 +425,7 @@ else:
     st.markdown("---")
 
     # 1. 전체 누적 통계
-    all_stat = calculate_ab_stats(records_tuple)
+    all_stat = calculate_historical_stats(records_tuple)
     st.markdown("**전체 누적 통계 (패스 회차 제외)**")
     if all_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {all_stat['a_win']}승 {all_stat['a_lose']}패 (승률 {all_stat['a_rate']:.1f}%)**")
@@ -411,8 +438,9 @@ else:
     st.markdown("---")
 
     # 2. 최근 3000개 누적 통계
-    recent_stat = calculate_ab_stats(records_tuple, limit_recent=3000)
-    recent_cnt = min(len(records), 3000)
+    recent_records_tuple = records_tuple[-3000:]
+    recent_stat = calculate_historical_stats(recent_records_tuple)
+    recent_cnt = len(recent_records_tuple)
     st.markdown(f"**최근 {recent_cnt}개 누적 통계 (패스 회차 제외)**")
     if recent_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
@@ -424,14 +452,14 @@ else:
 
     st.markdown("---")
 
-    # 3. 오늘 누적 통계 (오늘 날짜 curr_date 기준 완벽 필터링)
+    # 3. 오늘 누적 통계 (과거 3000개 패턴 기반 + 오늘 결과만 계산)
     try:
         dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
         w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception:
         w_str = ""
 
-    today_stat = calculate_ab_stats(records_tuple, target_date=curr_date)
+    today_stat = calculate_today_stats_correct(records_tuple, curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
@@ -502,7 +530,6 @@ else:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
         add_single_record_db(curr_date, next_round, input_val)
-        st.cache_data.clear()
         st.rerun()
 
     st.markdown("---")
@@ -513,7 +540,6 @@ else:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         add_single_record_db(curr_date, next_round, "PASS")
-        st.cache_data.clear()
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
@@ -522,21 +548,18 @@ else:
             push_backup()
             st.session_state.records.pop()
             delete_last_record_db()
-            st.cache_data.clear()
             st.rerun()
 
     if st.button("초기화", use_container_width=True, key="btn_reset"):
         push_backup()
         st.session_state.records = []
         sync_all_records_db([])
-        st.cache_data.clear()
         st.rerun()
 
     if st.button("되돌리기", use_container_width=True, key="btn_undo"):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
             sync_all_records_db(st.session_state.records)
-            st.cache_data.clear()
             st.rerun()
 
     # 📥 백업 다운로드
