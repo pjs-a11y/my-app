@@ -78,7 +78,6 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '짝')
 }
 
-# 💡 텍스트 매핑 오타 교정 완료
 ITEM_FULL_MAP = {
     '우사': '우사짝',
     '우삼': '우삼홀',
@@ -362,14 +361,23 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    input_val = st.segmented_control(label="결과 선택", options=ALL_COMBOS, selection_mode="single", label_visibility="collapsed", key=f"seg_ctrl_{len(records)}")
+    # 💡 세그먼트 컨트롤 키를 동적으로 부여하여 중복 이벤트 무한 루프 차단
+    input_val = st.segmented_control(
+        label="결과 선택",
+        options=ALL_COMBOS,
+        selection_mode="single",
+        label_visibility="collapsed",
+        key=f"seg_ctrl_{len(records)}_{records[-1]['round'] if records else 0}"
+    )
+
     if input_val:
         push_backup()
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
-        else: add_single_record_db(curr_date, next_round, input_val)
+        else:
+            add_single_record_db(curr_date, next_round, input_val)
         st.rerun()
 
     st.markdown("---")
@@ -381,7 +389,8 @@ else:
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
-        else: add_single_record_db(curr_date, next_round, "PASS")
+        else:
+            add_single_record_db(curr_date, next_round, "PASS")
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
