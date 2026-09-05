@@ -99,7 +99,7 @@ ITEM_FULL_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# DB 분할 조회를 통한 무제한 로드
+# DB 분할 로드
 def load_data():
     if not supabase:
         return []
@@ -192,7 +192,7 @@ def calculate_score_A_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_A_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
 
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -242,7 +242,7 @@ def calculate_score_B_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_B_engine_tuple(records_tuple):
-    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
+    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
 
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -263,7 +263,7 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# 💡 캐시 제거 완료: 실시간으로 정확한 오늘 통계 계산
+# 💡 [정확성 보장] 오늘 날짜 필터링 및 과거 회차 순회 완벽 구현
 def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: 
         eval_records = records_tuple[-limit_recent:]
@@ -283,6 +283,7 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
         
+        # 실제 레코드 날짜 수집
         rec_date = eval_records[i][0]
         if target_date and rec_date != target_date: continue
 
@@ -308,9 +309,9 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 앱 로드 시 DB 전체 데이터 로드
-if "records" not in st.session_state:
-    st.session_state.records = load_data()
+# 매번 DB 최신 로드 (날짜/회차 밀림 방지)
+db_records = load_data()
+st.session_state.records = db_records
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -423,7 +424,7 @@ else:
 
     st.markdown("---")
 
-    # 3. 오늘 누적 통계
+    # 3. 오늘 누적 통계 (오늘 날짜 curr_date 기준 완벽 필터링)
     try:
         dt_obj = datetime.strptime(curr_date, "%Y-%m-%d")
         w_str = WEEKDAYS[dt_obj.weekday()]
