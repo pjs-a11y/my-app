@@ -192,7 +192,6 @@ def calculate_score_A_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_A_engine_tuple(records_tuple):
-    # 과거 sub_slice의 직전 30개만 슬라이싱하여 과거 날짜 기준 왜곡 방지
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
 
@@ -243,7 +242,6 @@ def calculate_score_B_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_B_engine_tuple(records_tuple):
-    # 과거 sub_slice의 직전 30개만 슬라이싱하여 과거 날짜 기준 왜곡 방지
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
 
@@ -265,12 +263,10 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ [수정 완료] 과거 회차 순회 시 정확한 날짜 기준 보장
-@st.cache_data(show_spinner=False)
+# 💡 캐시 제거 완료: 실시간으로 정확한 오늘 통계 계산
 def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     if limit_recent: 
         eval_records = records_tuple[-limit_recent:]
-        # limit_recent 시 과거 자르기 offset 보정
         offset = max(0, len(records_tuple) - limit_recent)
     else: 
         eval_records = records_tuple
@@ -287,11 +283,9 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
         
-        # 💡 핵심 수정: 해당 회차(i)의 실제 날짜로 정확히 비교
         rec_date = eval_records[i][0]
         if target_date and rec_date != target_date: continue
 
-        # 과거 회차 예측 시점의 전체 sub 배열을 정확히 슬라이싱
         past_sub = records_tuple[:offset + i]
         
         res_a = analyze_A_engine_tuple(past_sub)
