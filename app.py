@@ -78,16 +78,16 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '짝')
 }
 
+# 💡 텍스트 매핑 오타 교정 완료
 ITEM_FULL_MAP = {
     '우사': '우사짝',
     '우삼': '우삼홀',
     '좌사': '좌사홀',
-    '좌삼': '좌사짝'
+    '좌삼': '좌삼짝'
 }
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# 💡 Supabase 기본 1000개 로딩 제한 해제 (3000개 수집 보장)
 def load_data():
     if not supabase: return []
     try:
@@ -345,7 +345,7 @@ else:
             b_avoid_ok = "안나옴 성공 🎯" if prev_b_res and prev_b_res['worst'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_a_res: st.markdown(f"🅰️ **A 추천 ({prev_a_res['top']}) ➔ {a_ok}** / **지울픽 ({prev_a_res['worst']}) ➔ {a_avoid_ok}**")
-            if prev_b_res: st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {b_avoid_ok}**")
+            if prev_b_res: st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {a_avoid_ok}**")
 
     st.markdown("---")
 
