@@ -192,7 +192,7 @@ def calculate_score_A_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_A_engine_tuple(records_tuple):
-    # 패턴 연산 속도 향상을 위해 직전 30개 데이터만 슬라이싱 참조
+    # 과거 sub_slice의 직전 30개만 슬라이싱하여 과거 날짜 기준 왜곡 방지
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
 
@@ -243,7 +243,7 @@ def calculate_score_B_engine(stream, val1, val2):
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_B_engine_tuple(records_tuple):
-    # 패턴 연산 속도 향상을 위해 직전 30개 데이터만 슬라이싱 참조
+    # 과거 sub_slice의 직전 30개만 슬라이싱하여 과거 날짜 기준 왜곡 방지
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
 
@@ -265,11 +265,16 @@ def analyze_B_engine_tuple(records_tuple):
         'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]
     }
 
-# ⚡ [속도 최적화] 메모리 캐싱 적용된 통계 집계 함수
+# ⚡ [수정 완료] 과거 회차 순회 시 정확한 날짜 기준 보장
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
-    if limit_recent: eval_records = records_tuple[-limit_recent:]
-    else: eval_records = records_tuple
+    if limit_recent: 
+        eval_records = records_tuple[-limit_recent:]
+        # limit_recent 시 과거 자르기 offset 보정
+        offset = max(0, len(records_tuple) - limit_recent)
+    else: 
+        eval_records = records_tuple
+        offset = 0
 
     n = len(eval_records)
     if n < 4: return None
@@ -281,9 +286,13 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
     for i in range(3, n):
         act = eval_records[i][2]
         if act not in ALL_COMBOS: continue
-        if target_date and eval_records[i][0] != target_date: continue
+        
+        # 💡 핵심 수정: 해당 회차(i)의 실제 날짜로 정확히 비교
+        rec_date = eval_records[i][0]
+        if target_date and rec_date != target_date: continue
 
-        past_sub = eval_records[:i]
+        # 과거 회차 예측 시점의 전체 sub 배열을 정확히 슬라이싱
+        past_sub = records_tuple[:offset + i]
         
         res_a = analyze_A_engine_tuple(past_sub)
         res_b = analyze_B_engine_tuple(past_sub)
@@ -305,7 +314,7 @@ def calculate_ab_stats(records_tuple, target_date=None, limit_recent=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-# 앱 로드 시 DB 전체 데이터를 메모리에 캐싱
+# 앱 로드 시 DB 전체 데이터 로드
 if "records" not in st.session_state:
     st.session_state.records = load_data()
 
