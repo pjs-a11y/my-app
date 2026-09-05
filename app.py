@@ -109,7 +109,7 @@ def load_data():
 def sync_all_records_db(records):
     if not supabase: return
     try:
-        trimmed_records = records[-MAX_DATA_SIZE:]
+        trimmed_records = records[-MAX_DATA_SIZE:] if records else []
         fetch_ids = supabase.table("ladder_records").select("id").execute()
         if fetch_ids and fetch_ids.data:
             id_list = [r['id'] for r in fetch_ids.data]
@@ -237,7 +237,8 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0
     }
 
-st.session_state.records = load_data()
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -344,7 +345,7 @@ else:
             b_avoid_ok = "안나옴 성공 🎯" if prev_b_res and prev_b_res['worst'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_a_res: st.markdown(f"🅰️ **A 추천 ({prev_a_res['top']}) ➔ {a_ok}** / **지울픽 ({prev_a_res['worst']}) ➔ {a_avoid_ok}**")
-            if prev_b_res: st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {a_avoid_ok}**")
+            if prev_b_res: st.markdown(f"🅱️ **B 추천 ({prev_b_res['top']}) ➔ {b_ok}** / **지울픽 ({prev_b_res['worst']}) ➔ {b_avoid_ok}**")
 
     st.markdown("---")
 
@@ -361,7 +362,6 @@ else:
     st.markdown("---")
     st.markdown("**결과 입력**")
 
-    # 💡 세그먼트 컨트롤 키를 동적으로 부여하여 중복 이벤트 무한 루프 차단
     input_val = st.segmented_control(
         label="결과 선택",
         options=ALL_COMBOS,
@@ -376,8 +376,7 @@ else:
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
-        else:
-            add_single_record_db(curr_date, next_round, input_val)
+        else: add_single_record_db(curr_date, next_round, input_val)
         st.rerun()
 
     st.markdown("---")
@@ -389,8 +388,7 @@ else:
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
-        else:
-            add_single_record_db(curr_date, next_round, "PASS")
+        else: add_single_record_db(curr_date, next_round, "PASS")
         st.toast(f"{next_round}회차 패스")
         st.rerun()
 
@@ -401,10 +399,13 @@ else:
             delete_last_record_db()
             st.rerun()
 
+    # 💡 [초기화 기능 완벽 보정] 클릭 즉시 로컬 세션 + DB 데이터 100% 삭제
     if st.button("초기화", use_container_width=True, key="btn_reset"):
         push_backup()
         st.session_state.records = []
+        st.session_state.history_stack = []
         sync_all_records_db([])
+        st.cache_data.clear()
         st.rerun()
 
     if st.button("되돌리기", use_container_width=True, key="btn_undo"):
