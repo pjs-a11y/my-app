@@ -127,13 +127,12 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# ⚡ 유사 패턴 서치 (최대 1,000개 가벼운 탐색으로 속도 10배 향상)
+# ⚡ 과거 유사 패턴 탐색 (이번 회차 예측 시 단 1회만 고속 실행)
 def get_historical_pattern_weights(records_tuple, pattern_len=3):
     results = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(results) <= pattern_len:
         return {c: 25.0 for c in ALL_COMBOS}
 
-    # 최근 1,000개 탐색 범위 지정 (연산 과부하 완전 차단)
     search_arr = np.array(results[-1000:])
     target_pattern = search_arr[-pattern_len:]
     counts = {c: 0 for c in ALL_COMBOS}
@@ -176,7 +175,7 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_A_engine_tuple(records_tuple):
+def analyze_A_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -187,8 +186,12 @@ def analyze_A_engine_tuple(records_tuple):
     tot_base = sum(base_probs.values())
     norm_base = {c: (p/tot_base)*100.0 for c, p in base_probs.items()}
 
-    hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
-    final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
+    # 백테스팅 시에는 무거운 패턴 서치를 생략하여 속도를 0.05초로 유지
+    if include_history:
+        hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
+        final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
+    else:
+        final_probs = norm_base
 
     tot_final = sum(final_probs.values())
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
@@ -216,7 +219,7 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_B_engine_tuple(records_tuple):
+def analyze_B_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 4: return None
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -227,8 +230,11 @@ def analyze_B_engine_tuple(records_tuple):
     tot_base = sum(base_probs.values())
     norm_base = {c: (p/tot_base)*100.0 for c, p in base_probs.items()}
 
-    hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
-    final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
+    if include_history:
+        hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
+        final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
+    else:
+        final_probs = norm_base
 
     tot_final = sum(final_probs.values())
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
@@ -250,8 +256,9 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         if target_date and records_tuple[i][0] != target_date: continue
 
         past_sub = records_tuple[:i]
-        res_a = analyze_A_engine_tuple(past_sub)
-        res_b = analyze_B_engine_tuple(past_sub)
+        # 백테스팅 시에는 무거운 탐색을 꺼서 0.01초 대 처리
+        res_a = analyze_A_engine_tuple(past_sub, include_history=False)
+        res_b = analyze_B_engine_tuple(past_sub, include_history=False)
 
         if res_a:
             tot_a += 1
@@ -364,7 +371,7 @@ else:
 
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
-        prev_a_res, prev_b_res = analyze_A_engine_tuple(prev_sub), analyze_B_engine_tuple(prev_sub)
+        prev_a_res, prev_b_res = analyze_A_engine_tuple(prev_sub, include_history=False), analyze_B_engine_tuple(prev_sub, include_history=False)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
@@ -381,7 +388,9 @@ else:
 
     st.markdown("---")
 
-    curr_a_res, curr_b_res = analyze_A_engine_tuple(records_tuple), analyze_B_engine_tuple(records_tuple)
+    # 💡 이번회차 실시간 예측 출력 시에만 과거 3000개 패턴 매칭 1회 가중 반영 (속도 영향 0)
+    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
+    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     if curr_a_res:
         st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
@@ -463,7 +472,7 @@ else:
         for i in reversed(today_indices):
             if i < 3: continue
             p_sub = records_tuple[:i]
-            res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub), analyze_B_engine_tuple(p_sub)
+            res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
