@@ -127,7 +127,6 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# ⚡ 과거 유사 패턴 탐색 (이번 회차 예측 시 단 1회만 고속 실행)
 def get_historical_pattern_weights(records_tuple, pattern_len=3):
     results = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(results) <= pattern_len:
@@ -150,43 +149,36 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-def calculate_score_A_engine(stream, val1, val2):
+# 🅰️ [A 엔진: 장줄 전용 분석 엔진]
+def calculate_score_streak_A(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
-    if stream[-1] == stream[-2]:
-        rec = stream[-1]
-        streak = 2
-        for idx in range(3, min(n + 1, 10)):
-            if stream[-idx] == rec: streak += 1
-            else: break
-        bonus = 12.0 + (streak * 4.0)
-        if rec == val1: s1 += bonus
-        else: s2 += bonus
-    if stream[-1] != stream[-2]:
-        streak = 2
-        for idx in range(3, min(n + 1, 10)):
-            if stream[-idx + 1] != stream[-idx]: streak += 1
-            else: break
-        opp_val = val2 if stream[-1] == val1 else val1
-        bonus = 10.0 + (streak * 3.5)
-        if opp_val == val1: s1 += bonus
-        else: s2 += bonus
+    rec = stream[-1]
+    streak = 1
+    for idx in range(2, min(n + 1, 10)):
+        if stream[-idx] == rec: streak += 1
+        else: break
+    
+    # 장줄 연속성에 따른 강력한 보너스 부여
+    bonus = 15.0 + (streak * 5.0)
+    if rec == val1: s1 += bonus
+    else: s2 += bonus
+
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_A_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return None
-    s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
-    l_s = calculate_score_A_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
-    o_s = calculate_score_A_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
+    if len(valid) < 2: return None
+    s_s = calculate_score_streak_A([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_streak_A([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_streak_A([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
     
     base_probs = {c: (s_s[ITEM_MAP[c][0]]/100.0)*(l_s[ITEM_MAP[c][1]]/100.0)*(o_s[ITEM_MAP[c][2]]/100.0) for c in ALL_COMBOS}
     tot_base = sum(base_probs.values())
     norm_base = {c: (p/tot_base)*100.0 for c, p in base_probs.items()}
 
-    # 백테스팅 시에는 무거운 패턴 서치를 생략하여 속도를 0.05초로 유지
     if include_history:
         hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
         final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
@@ -199,32 +191,34 @@ def analyze_A_engine_tuple(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
-def calculate_score_B_engine(stream, val1, val2):
+# 🅱️ [B 엔진: 퐁당 전용 분석 엔진]
+def calculate_score_pongdang_B(stream, val1, val2):
     n = len(stream)
-    if n < 4: return {val1: 50.0, val2: 50.0}
+    if n < 2: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
-    if stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        if stream[-1] == val1: s1 += 22.0
-        else: s2 += 22.0
-    elif n >= 5 and stream[-3] == stream[-4] and stream[-1] == stream[-2] and stream[-1] != stream[-3]:
-        opp_val = val2 if stream[-1] == val1 else val1
-        if opp_val == val1: s1 += 25.0
-        else: s2 += 25.0
-    if n >= 6 and stream[-1] == stream[-2] and stream[-2] != stream[-3] and stream[-3] == stream[-4]:
-        if stream[-1] == val1: s1 += 20.0
-        else: s2 += 20.0
-    if n >= 6 and stream[-1] == stream[-5] and stream[-2] == stream[-4]:
-        if stream[-3] == val1: s1 += 24.0
-        else: s2 += 24.0
+    rec = stream[-1]
+    
+    # 직전 값의 반대(퐁당)로 꺾일 방향에 가중치 부여
+    opp_val = val2 if rec == val1 else val1
+    
+    streak = 1
+    for idx in range(2, min(n + 1, 10)):
+        if stream[-idx + 1] != stream[-idx]: streak += 1
+        else: break
+        
+    bonus = 15.0 + (streak * 5.0)
+    if opp_val == val1: s1 += bonus
+    else: s2 += bonus
+
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
 def analyze_B_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
-    if len(valid) < 4: return None
-    s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
-    l_s = calculate_score_B_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
-    o_s = calculate_score_B_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
+    if len(valid) < 2: return None
+    s_s = calculate_score_pongdang_B([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_pongdang_B([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_pongdang_B([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
 
     base_probs = {c: (s_s[ITEM_MAP[c][0]]/100.0)*(l_s[ITEM_MAP[c][1]]/100.0)*(o_s[ITEM_MAP[c][2]]/100.0) for c in ALL_COMBOS}
     tot_base = sum(base_probs.values())
@@ -256,7 +250,6 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         if target_date and records_tuple[i][0] != target_date: continue
 
         past_sub = records_tuple[:i]
-        # 백테스팅 시에는 무거운 탐색을 꺼서 0.01초 대 처리
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
 
@@ -350,9 +343,9 @@ else:
     recent_cnt = len(records)
     st.markdown(f"**누적 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
-        st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅰️ **A (장줄 전용) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (퐁당 전용) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
 
     st.markdown("---")
@@ -362,9 +355,9 @@ else:
     today_stat = calculate_ab_stats_clean(records_tuple, target_date=curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"🅰️ **A (장줄/퐁당) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅰️ **A (장줄 전용) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **B (박스/계단/데칼) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (퐁당 전용) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
 
     st.markdown("---")
@@ -388,16 +381,15 @@ else:
 
     st.markdown("---")
 
-    # 💡 이번회차 실시간 예측 출력 시에만 과거 3000개 패턴 매칭 1회 가중 반영 (속도 영향 0)
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     if curr_a_res:
-        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
+        st.markdown(f"🅰️ **[A: 장줄 전용] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
         st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
     st.markdown(" ")
     if curr_b_res:
-        st.markdown(f"🅱️ **[B: 박스/계단/데칼] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
+        st.markdown(f"🅱️ **[B: 퐁당 전용] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
         st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
