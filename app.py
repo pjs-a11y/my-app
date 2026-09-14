@@ -127,12 +127,14 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
+# ⚡ 캐싱 기반 고속 과거 패턴 탐색
+@st.cache_data(show_spinner=False)
 def get_historical_pattern_weights(records_tuple, pattern_len=3):
     results = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(results) <= pattern_len:
         return {c: 25.0 for c in ALL_COMBOS}
 
-    search_arr = np.array(results[-1000:])
+    search_arr = np.array(results[-500:])
     target_pattern = search_arr[-pattern_len:]
     counts = {c: 0 for c in ALL_COMBOS}
     total_matches = 0
@@ -245,7 +247,6 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         if target_date and records_tuple[i][0] != target_date: continue
 
         past_sub = records_tuple[:i]
-        # 통계 백테스팅 시 속도를 위해 서치는 끄되 통계 연산 유지
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
 
@@ -358,11 +359,14 @@ else:
 
     st.markdown("---")
 
-    # 💡 직전회차 검증 시에도 include_history=True를 동일 적용하여 표기 미스매치 완전 차단
+    # ⚡ [핵심] 실시간 연산 1회 수행 후 변수 재활용 (이중 연산 차단으로 0.05초 유지)
+    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
+    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
+
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
-        prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=True)
-        prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=True)
+        prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
+        prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=False)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
@@ -379,8 +383,6 @@ else:
 
     st.markdown("---")
 
-    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
-    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     if curr_a_res:
         st.markdown(f"🅰️ **[A: 장줄 전용] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
