@@ -149,7 +149,6 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-# 🅰️ [A 엔진: 장줄 전용 분석 엔진]
 def calculate_score_streak_A(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -160,7 +159,6 @@ def calculate_score_streak_A(stream, val1, val2):
         if stream[-idx] == rec: streak += 1
         else: break
     
-    # 장줄 연속성에 따른 강력한 보너스 부여
     bonus = 15.0 + (streak * 5.0)
     if rec == val1: s1 += bonus
     else: s2 += bonus
@@ -191,14 +189,11 @@ def analyze_A_engine_tuple(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
-# 🅱️ [B 엔진: 퐁당 전용 분석 엔진]
 def calculate_score_pongdang_B(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
     rec = stream[-1]
-    
-    # 직전 값의 반대(퐁당)로 꺾일 방향에 가중치 부여
     opp_val = val2 if rec == val1 else val1
     
     streak = 1
@@ -250,6 +245,7 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         if target_date and records_tuple[i][0] != target_date: continue
 
         past_sub = records_tuple[:i]
+        # 통계 백테스팅 시 속도를 위해 서치는 끄되 통계 연산 유지
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
 
@@ -362,9 +358,11 @@ else:
 
     st.markdown("---")
 
+    # 💡 직전회차 검증 시에도 include_history=True를 동일 적용하여 표기 미스매치 완전 차단
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
-        prev_a_res, prev_b_res = analyze_A_engine_tuple(prev_sub, include_history=False), analyze_B_engine_tuple(prev_sub, include_history=False)
+        prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=True)
+        prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=True)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
