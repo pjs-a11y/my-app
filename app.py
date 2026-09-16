@@ -150,7 +150,7 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-# 🅰️ [A 엔진: 4가지 조합 통분석 (장줄 흐름)]
+# 🅰️ [A 엔진: 4가지 조합 직접 분석 - 장줄 관점]
 def analyze_A_engine_direct(records_tuple, include_history=False):
     valid = [r[2] for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 2: return None
@@ -176,9 +176,9 @@ def analyze_A_engine_direct(records_tuple, include_history=False):
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
     sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
 
-    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
+    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
-# 🅱️ [B 엔진: 4가지 조합 통분석 (퐁당/교대 흐름)]
+# 🅱️ [B 엔진: 4가지 조합 직접 분석 - 퐁당 관점]
 def analyze_B_engine_direct(records_tuple, include_history=False):
     valid = [r[2] for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 2: return None
@@ -186,7 +186,6 @@ def analyze_B_engine_direct(records_tuple, include_history=False):
     scores = {c: 50.0 for c in ALL_COMBOS}
     rec = valid[-1]
     
-    # 직전 결과 제외 나머지 3개 조합에 교대 가중치 부여
     other_combos = [c for c in ALL_COMBOS if c != rec]
     streak = 1
     for idx in range(2, min(len(valid) + 1, 10)):
@@ -209,42 +208,19 @@ def analyze_B_engine_direct(records_tuple, include_history=False):
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
     sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
 
-    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
+    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
-# 🎯 7가지 픽(4개 조합 + 3개 단품) 중 최적 1개 픽 최종 도출
-def select_best_of_7_picks(res_a, res_b):
+# 🎯 4가지 조합 중 최적 1개 픽 최종 도출
+def select_best_of_4_combos(res_a, res_b):
     if not res_a or not res_b: return None
     
     a_top, a_prob = res_a['top'], res_a['top_prob']
     b_top, b_prob = res_b['top'], res_b['top_prob']
     
-    # 단품 계산 (좌/우, 사/삼, 짝/홀)
-    sub_probs = {'우': 0, '좌': 0, '사': 0, '삼': 0, '짝': 0, '홀': 0}
-    for c, p in res_a['probs'].items():
-        s, l, o = ITEM_MAP[c]
-        sub_probs[s] += p * 0.5
-        sub_probs[l] += p * 0.5
-        sub_probs[o] += p * 0.5
-    for c, p in res_b['probs'].items():
-        s, l, o = ITEM_MAP[c]
-        sub_probs[s] += p * 0.5
-        sub_probs[l] += p * 0.5
-        sub_probs[o] += p * 0.5
-
-    best_start = '우' if sub_probs['우'] >= sub_probs['좌'] else '좌'
-    best_line = '사' if sub_probs['사'] >= sub_probs['삼'] else '삼'
-    best_odd = '짝' if sub_probs['짝'] >= sub_probs['홀'] else '홀'
-    
-    options = [
-        (f"조합 픽 A: {a_top} ({ITEM_FULL_MAP[a_top]})", a_prob),
-        (f"조합 픽 B: {b_top} ({ITEM_FULL_MAP[b_top]})", b_prob),
-        (f"단품 픽 [출발]: {best_start}", sub_probs[best_start]),
-        (f"단품 픽 [줄수]: {best_line}", sub_probs[best_line]),
-        (f"단품 픽 [홀짝]: {best_odd}", sub_probs[best_odd])
-    ]
-    
-    sorted_opts = sorted(options, key=lambda x: x[1], reverse=True)
-    return sorted_opts[0]
+    if a_prob >= b_prob:
+        return (a_top, a_prob, "A: 장줄 기반")
+    else:
+        return (b_top, b_prob, "B: 퐁당 기반")
 
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_clean(records_tuple, target_date=None):
@@ -395,10 +371,10 @@ else:
 
     st.markdown("---")
 
-    best_7_pick = select_best_of_7_picks(curr_a_res, curr_b_res)
+    best_4_pick = select_best_of_4_combos(curr_a_res, curr_b_res)
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
-    if best_7_pick:
-        st.markdown(f"🔥 **[7개 픽 중 최적 1선택 추천] : `{best_7_pick[0]}`** `(신뢰도 {best_7_pick[1]:.1f}%)`", help="7가지 픽 후보 중 확률 수치가 가장 높은 최적의 1개 픽을 선택합니다.")
+    if best_4_pick:
+        st.markdown(f"🎯 **[4가지 조합 중 최적 1선택 추천] : `{best_4_pick[0]}` ({ITEM_FULL_MAP[best_4_pick[0]]})** `(확률 {best_4_pick[1]:.1f}% / {best_4_pick[2]})`", help="4가지 조합(우사/우삼/좌사/좌삼) 중 분석 확률 수치가 가장 높은 1개 조합을 선택합니다.")
     st.markdown(" ")
     if curr_a_res:
         st.markdown(f"🅰️ **[A: 장줄 4조합 통분석] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
