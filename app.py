@@ -150,13 +150,12 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-# 🅰️ [A 엔진: 장줄 및 단순 퐁당 집중 분석]
+# 🅰️ [A 엔진: 장줄 및 단순 퐁당 분석]
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
     
-    # 1. 장줄 감지 (동일 결과 연속 유지)
     if stream[-1] == stream[-2]:
         rec = stream[-1]
         streak = 2
@@ -167,7 +166,6 @@ def calculate_score_A_engine(stream, val1, val2):
         if rec == val1: s1 += bonus
         else: s2 += bonus
         
-    # 2. 단순 퐁당 감지 (교대 연속 유지)
     if stream[-1] != stream[-2]:
         streak = 2
         for idx in range(3, min(n + 1, 10)):
@@ -202,29 +200,24 @@ def analyze_A_engine_tuple(records_tuple, include_history=False):
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
     sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
 
-    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
+    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
 
-# 🅱️ [B 엔진: 투투/쓰리쓰리 박스 및 계단 패턴 집중 분석]
+# 🅱️ [B 엔진: 박스 및 계단 패턴 분석]
 def calculate_score_B_engine(stream, val1, val2):
     n = len(stream)
     if n < 3: return {val1: 50.0, val2: 50.0}
     s1, s2 = 50.0, 50.0
     
-    # 1. 2-2 박스 패턴 (우우->좌좌 / 33->44) 감지
     if n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
-        # 2개가 끊기고 반대로 넘어간 1번째 상태 -> 2연타를 완성하기 위해 한번 더 같게 나올 확률 상승
         target = stream[-1]
         if target == val1: s1 += 22.0
         else: s2 += 22.0
     elif n >= 4 and stream[-1] == stream[-2] and stream[-2] != stream[-3]:
-        # 2개가 완성된 상태 -> 2-2 박스를 위해 다시 꺾일 확률 상승
         opp_target = val2 if stream[-1] == val1 else val1
         if opp_target == val1: s1 += 24.0
         else: s2 += 24.0
         
-    # 2. 3-3-3 또는 1-2-1 계단/박스 패턴 감지
     if n >= 5 and stream[-1] == stream[-2] and stream[-2] == stream[-3]:
-        # 3개가 채워진 순간 꺾이는 박스 타이밍 감지
         opp_target = val2 if stream[-1] == val1 else val1
         if opp_target == val1: s1 += 20.0
         else: s2 += 20.0
@@ -253,7 +246,28 @@ def analyze_B_engine_tuple(records_tuple, include_history=False):
     norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
     sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
 
-    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
+    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
+
+# 🎯 A/B 엔진 종합 결과 조합 분석 (최종 베팅 픽 도출)
+def calculate_combined_betting_pick(res_a, res_b):
+    if not res_a or not res_b: return None
+    
+    combined_probs = {}
+    for c in ALL_COMBOS:
+        # A엔진 50% + B엔진 50% 가중합 계산
+        combined_probs[c] = (res_a['probs'][c] * 0.5) + (res_b['probs'][c] * 0.5)
+        
+    sorted_combos = sorted(combined_probs.items(), key=lambda x: x[1], reverse=True)
+    
+    best_combo, best_prob = sorted_combos[0][0], sorted_combos[0][1]
+    worst_combo, worst_prob = sorted_combos[-1][0], sorted_combos[-1][1]
+    
+    return {
+        'best': best_combo,
+        'best_prob': best_prob,
+        'worst': worst_combo,
+        'worst_prob': worst_prob
+    }
 
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_clean(records_tuple, target_date=None):
@@ -383,6 +397,7 @@ else:
 
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
+    combined_pick = calculate_combined_betting_pick(curr_a_res, curr_b_res)
 
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
@@ -405,6 +420,13 @@ else:
     st.markdown("---")
 
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
+    
+    # 🎯 🔥 A+B 엔진 조합 최종 베팅 픽 표출
+    if combined_pick:
+        st.markdown(f"🔥 **[최종 종합 베팅 픽] 추천: `{combined_pick['best']}` ({ITEM_FULL_MAP[combined_pick['best']]})** `종합확률 {combined_pick['best_prob']:.1f}%`")
+        st.markdown(f"   ⛔ **[최종 종합 지울 픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `종합확률 {combined_pick['worst_prob']:.1f}%`")
+        st.markdown(" ")
+
     if curr_a_res:
         st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
         st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
