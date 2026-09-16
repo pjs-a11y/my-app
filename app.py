@@ -248,25 +248,29 @@ def analyze_B_engine_tuple(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
 
-# 🎯 A/B 엔진 종합 결과 조합 분석 (최종 베팅 픽 도출)
+# 🛡️ [교집합 방어 적용] A/B 엔진 종합 결과 조합 분석
 def calculate_combined_betting_pick(res_a, res_b):
     if not res_a or not res_b: return None
     
+    # 1. 종합 추천 픽: 기존 방식 유지 (50:50 가중 평균 점수가 가장 높은 픽)
     combined_probs = {}
     for c in ALL_COMBOS:
-        # A엔진 50% + B엔진 50% 가중합 계산
         combined_probs[c] = (res_a['probs'][c] * 0.5) + (res_b['probs'][c] * 0.5)
-        
-    sorted_combos = sorted(combined_probs.items(), key=lambda x: x[1], reverse=True)
+    best_combo = max(combined_probs.items(), key=lambda x: x[1])
     
-    best_combo, best_prob = sorted_combos[0][0], sorted_combos[0][1]
-    worst_combo, worst_prob = sorted_combos[-1][0], sorted_combos[-1][1]
+    # 2. 🛡️ 종합 지울 픽 (교집합 최솟값 방어 알고리즘):
+    # 두 엔진 중 어느 하나라도 나올 가능성(확률)을 높게 본 픽은 지울 픽에서 완전히 탈락시킴
+    # 두 엔진 모두 공통적으로 '가장 안 나올 확률(Min)'을 부여한 픽을 선출
+    min_probs = {}
+    for c in ALL_COMBOS:
+        min_probs[c] = min(res_a['probs'][c], res_b['probs'][c])
+    worst_combo = min(min_probs.items(), key=lambda x: x[1])
     
     return {
-        'best': best_combo,
-        'best_prob': best_prob,
-        'worst': worst_combo,
-        'worst_prob': worst_prob
+        'best': best_combo[0],
+        'best_prob': best_combo[1],
+        'worst': worst_combo[0],
+        'worst_prob': worst_combo[1]
     }
 
 @st.cache_data(show_spinner=False)
@@ -421,10 +425,9 @@ else:
 
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
     
-    # 🎯 🔥 A+B 엔진 조합 최종 베팅 픽 표출
     if combined_pick:
         st.markdown(f"🔥 **[최종 종합 베팅 픽] 추천: `{combined_pick['best']}` ({ITEM_FULL_MAP[combined_pick['best']]})** `종합확률 {combined_pick['best_prob']:.1f}%`")
-        st.markdown(f"   ⛔ **[최종 종합 지울 픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `종합확률 {combined_pick['worst_prob']:.1f}%`")
+        st.markdown(f"   ⛔ **[최종 종합 지울 픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `위험도 최소 {combined_pick['worst_prob']:.1f}%`")
         st.markdown(" ")
 
     if curr_a_res:
