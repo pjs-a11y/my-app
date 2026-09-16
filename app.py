@@ -150,53 +150,47 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-# 🅰️ [A 엔진: 4가지 조합 직접 분석 - 장줄 관점]
-def analyze_A_engine_direct(records_tuple, include_history=False):
-    valid = [r[2] for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
-    if len(valid) < 2: return None
+# 🅰️ [A 엔진: 장줄 및 단순 퐁당 집중 분석]
+def calculate_score_A_engine(stream, val1, val2):
+    n = len(stream)
+    if n < 2: return {val1: 50.0, val2: 50.0}
+    s1, s2 = 50.0, 50.0
     
-    scores = {c: 50.0 for c in ALL_COMBOS}
-    rec = valid[-1]
-    streak = 1
-    for idx in range(2, min(len(valid) + 1, 10)):
-        if valid[-idx] == rec: streak += 1
-        else: break
-    
-    scores[rec] += 20.0 + (streak * 6.0)
-    tot = sum(scores.values())
-    norm_base = {c: (scores[c]/tot)*100.0 for c in ALL_COMBOS}
-
-    if include_history:
-        hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
-        final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
-    else:
-        final_probs = norm_base
-
-    tot_final = sum(final_probs.values())
-    norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
-    sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
-
-    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
-
-# 🅱️ [B 엔진: 4가지 조합 직접 분석 - 퐁당 관점]
-def analyze_B_engine_direct(records_tuple, include_history=False):
-    valid = [r[2] for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
-    if len(valid) < 2: return None
-    
-    scores = {c: 50.0 for c in ALL_COMBOS}
-    rec = valid[-1]
-    
-    other_combos = [c for c in ALL_COMBOS if c != rec]
-    streak = 1
-    for idx in range(2, min(len(valid) + 1, 10)):
-        if valid[-idx + 1] != valid[-idx]: streak += 1
-        else: break
+    # 1. 장줄 감지 (동일 결과 연속 유지)
+    if stream[-1] == stream[-2]:
+        rec = stream[-1]
+        streak = 2
+        for idx in range(3, min(n + 1, 10)):
+            if stream[-idx] == rec: streak += 1
+            else: break
+        bonus = 15.0 + (streak * 4.5)
+        if rec == val1: s1 += bonus
+        else: s2 += bonus
         
-    for c in other_combos:
-        scores[c] += 10.0 + (streak * 3.0)
+    # 2. 단순 퐁당 감지 (교대 연속 유지)
+    if stream[-1] != stream[-2]:
+        streak = 2
+        for idx in range(3, min(n + 1, 10)):
+            if stream[-idx + 1] != stream[-idx]: streak += 1
+            else: break
+        opp_val = val2 if stream[-1] == val1 else val1
+        bonus = 14.0 + (streak * 4.0)
+        if opp_val == val1: s1 += bonus
+        else: s2 += bonus
 
-    tot = sum(scores.values())
-    norm_base = {c: (scores[c]/tot)*100.0 for c in ALL_COMBOS}
+    tot = s1 + s2
+    return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
+
+def analyze_A_engine_tuple(records_tuple, include_history=False):
+    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
+    if len(valid) < 2: return None
+    s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_A_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_A_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
+    
+    base_probs = {c: (s_s[ITEM_MAP[c][0]]/100.0)*(l_s[ITEM_MAP[c][1]]/100.0)*(o_s[ITEM_MAP[c][2]]/100.0) for c in ALL_COMBOS}
+    tot_base = sum(base_probs.values())
+    norm_base = {c: (p/tot_base)*100.0 for c, p in base_probs.items()}
 
     if include_history:
         hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
@@ -210,17 +204,56 @@ def analyze_B_engine_direct(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
-# 🎯 4가지 조합 중 최적 1개 픽 최종 도출
-def select_best_of_4_combos(res_a, res_b):
-    if not res_a or not res_b: return None
+# 🅱️ [B 엔진: 투투/쓰리쓰리 박스 및 계단 패턴 집중 분석]
+def calculate_score_B_engine(stream, val1, val2):
+    n = len(stream)
+    if n < 3: return {val1: 50.0, val2: 50.0}
+    s1, s2 = 50.0, 50.0
     
-    a_top, a_prob = res_a['top'], res_a['top_prob']
-    b_top, b_prob = res_b['top'], res_b['top_prob']
-    
-    if a_prob >= b_prob:
-        return (a_top, a_prob, "A: 장줄 기반")
+    # 1. 2-2 박스 패턴 (우우->좌좌 / 33->44) 감지
+    if n >= 4 and stream[-2] == stream[-3] and stream[-1] != stream[-2]:
+        # 2개가 끊기고 반대로 넘어간 1번째 상태 -> 2연타를 완성하기 위해 한번 더 같게 나올 확률 상승
+        target = stream[-1]
+        if target == val1: s1 += 22.0
+        else: s2 += 22.0
+    elif n >= 4 and stream[-1] == stream[-2] and stream[-2] != stream[-3]:
+        # 2개가 완성된 상태 -> 2-2 박스를 위해 다시 꺾일 확률 상승
+        opp_target = val2 if stream[-1] == val1 else val1
+        if opp_target == val1: s1 += 24.0
+        else: s2 += 24.0
+        
+    # 2. 3-3-3 또는 1-2-1 계단/박스 패턴 감지
+    if n >= 5 and stream[-1] == stream[-2] and stream[-2] == stream[-3]:
+        # 3개가 채워진 순간 꺾이는 박스 타이밍 감지
+        opp_target = val2 if stream[-1] == val1 else val1
+        if opp_target == val1: s1 += 20.0
+        else: s2 += 20.0
+
+    tot = s1 + s2
+    return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
+
+def analyze_B_engine_tuple(records_tuple, include_history=False):
+    valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
+    if len(valid) < 3: return None
+    s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
+    l_s = calculate_score_B_engine([ITEM_MAP[r[2]][1] for r in valid], '사', '삼')
+    o_s = calculate_score_B_engine([ITEM_MAP[r[2]][2] for r in valid], '짝', '홀')
+
+    base_probs = {c: (s_s[ITEM_MAP[c][0]]/100.0)*(l_s[ITEM_MAP[c][1]]/100.0)*(o_s[ITEM_MAP[c][2]]/100.0) for c in ALL_COMBOS}
+    tot_base = sum(base_probs.values())
+    norm_base = {c: (p/tot_base)*100.0 for c, p in base_probs.items()}
+
+    if include_history:
+        hist_weights = get_historical_pattern_weights(records_tuple, pattern_len=3)
+        final_probs = {c: (norm_base[c] * 0.7) + (hist_weights[c] * 0.3) for c in ALL_COMBOS}
     else:
-        return (b_top, b_prob, "B: 퐁당 기반")
+        final_probs = norm_base
+
+    tot_final = sum(final_probs.values())
+    norm_probs = {c: (p/tot_final)*100.0 for c, p in final_probs.items()}
+    sorted_combos = sorted(norm_probs.items(), key=lambda x: x[1], reverse=True)
+
+    return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1]}
 
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_clean(records_tuple, target_date=None):
@@ -236,8 +269,8 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         if target_date and records_tuple[i][0] != target_date: continue
 
         past_sub = records_tuple[:i]
-        res_a = analyze_A_engine_direct(past_sub, include_history=False)
-        res_b = analyze_B_engine_direct(past_sub, include_history=False)
+        res_a = analyze_A_engine_tuple(past_sub, include_history=False)
+        res_b = analyze_B_engine_tuple(past_sub, include_history=False)
 
         if res_a:
             tot_a += 1
@@ -329,9 +362,9 @@ else:
     recent_cnt = len(records)
     st.markdown(f"**누적 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
-        st.markdown(f"🅰️ **A (장줄 4조합 통분석) 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅰️ **A (장줄/퐁당 전용) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 (승률 {recent_stat['a_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **B (퐁당 4조합 통분석) 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (박스/계단 전용) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 (승률 {recent_stat['b_avoid_rate']:.1f}%)**")
 
     st.markdown("---")
@@ -341,20 +374,20 @@ else:
     today_stat = calculate_ab_stats_clean(records_tuple, target_date=curr_date)
     st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"🅰️ **A (장줄 4조합 통분석) 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
+        st.markdown(f"🅰️ **A (장줄/퐁당 전용) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **A 지울 픽 성공률 : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 (승률 {today_stat['a_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅱️ **B (퐁당 4조합 통분석) 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
+        st.markdown(f"🅱️ **B (박스/계단 전용) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%)**")
         st.markdown(f"   ⚠️ **B 지울 픽 성공률 : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 (승률 {today_stat['b_avoid_rate']:.1f}%)**")
 
     st.markdown("---")
 
-    curr_a_res = analyze_A_engine_direct(records_tuple, include_history=True)
-    curr_b_res = analyze_B_engine_direct(records_tuple, include_history=True)
+    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
+    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
 
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
-        prev_a_res = analyze_A_engine_direct(prev_sub, include_history=False)
-        prev_b_res = analyze_B_engine_direct(prev_sub, include_history=False)
+        prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
+        prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=False)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
@@ -371,17 +404,13 @@ else:
 
     st.markdown("---")
 
-    best_4_pick = select_best_of_4_combos(curr_a_res, curr_b_res)
     st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
-    if best_4_pick:
-        st.markdown(f"🎯 **[4가지 조합 중 최적 1선택 추천] : `{best_4_pick[0]}` ({ITEM_FULL_MAP[best_4_pick[0]]})** `(확률 {best_4_pick[1]:.1f}% / {best_4_pick[2]})`", help="4가지 조합(우사/우삼/좌사/좌삼) 중 분석 확률 수치가 가장 높은 1개 조합을 선택합니다.")
-    st.markdown(" ")
     if curr_a_res:
-        st.markdown(f"🅰️ **[A: 장줄 4조합 통분석] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
+        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
         st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
     st.markdown(" ")
     if curr_b_res:
-        st.markdown(f"🅱️ **[B: 퐁당 4조합 통분석] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
+        st.markdown(f"🅱️ **[B: 박스/계단] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
         st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
@@ -456,7 +485,7 @@ else:
         for i in reversed(today_indices):
             if i < 3: continue
             p_sub = records_tuple[:i]
-            res_a_prev, res_b_prev = analyze_A_engine_direct(p_sub, include_history=False), analyze_B_engine_direct(p_sub, include_history=False)
+            res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
