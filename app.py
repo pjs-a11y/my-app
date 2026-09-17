@@ -177,7 +177,7 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_A_engine_tuple(records_tuple, include_history=True):
+def analyze_A_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 2: return None
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -222,7 +222,7 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_B_engine_tuple(records_tuple, include_history=True):
+def analyze_B_engine_tuple(records_tuple, include_history=False):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -287,8 +287,7 @@ def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_faile
         'mode_info': info
     }
 
-# 📊 통계 및 과거 추천 픽 완전 일치 연산 (include_history=True 100% 동기화)
-def calculate_all_history_and_stats(records_tuple, target_date=None):
+def calculate_all_history_and_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
     if n < 4: return None, {}
     
@@ -303,14 +302,18 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
 
     for i in range(3, n):
         act = records_tuple[i][2]
+        rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         
-        # 🎯 과거 회차 추천 당시와 100% 똑같이 include_history=True 옵션 적용
         past_sub = records_tuple[:i]
+        res_a = analyze_A_engine_tuple(past_sub, include_history=False)
+        res_b = analyze_B_engine_tuple(past_sub, include_history=False)
         
-        res_a = analyze_A_engine_tuple(past_sub, include_history=True)
-        res_b = analyze_B_engine_tuple(past_sub, include_history=True)
-        
-        res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
+        # 세션에 당시 추천이 직접 기록되어 있으면 우선 사용 (100% 동기화)
+        if rd_key in history_store:
+            res_comb = history_store[rd_key]
+        else:
+            res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
+            
         history_picks[i] = res_comb
 
         if act not in ALL_COMBOS: continue
@@ -353,6 +356,9 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
 
 if "records" not in st.session_state:
     st.session_state.records = load_data()
+
+if "history_store" not in st.session_state:
+    st.session_state.history_store = {}
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -421,7 +427,7 @@ else:
 
     st.markdown("---")
 
-    recent_stat, history_picks = calculate_all_history_and_stats(records_tuple)
+    recent_stat, history_picks = calculate_all_history_and_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
     st.markdown(f"**누적 지울픽 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
@@ -433,7 +439,7 @@ else:
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
-    today_stat, _ = calculate_all_history_and_stats(records_tuple, target_date=curr_date)
+    today_stat, _ = calculate_all_history_and_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
     st.markdown(f"**오늘 누적 지울픽 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"⛔ **종합 지울픽 성공률 : {today_stat['comb_avoid_win']}승 {today_stat['comb_avoid_lose']}패 (성공률 {today_stat['comb_avoid_rate']:.1f}%)**")
@@ -464,6 +470,10 @@ else:
     
     last_failed_status = recent_stat['last_failed'] if recent_stat else False
     combined_pick = calculate_combined_avoid_pick_simple(records_tuple, curr_a_res, curr_b_res, prev_failed=last_failed_status)
+
+    if combined_pick:
+        next_rd_key = f"{curr_date}_{next_round}"
+        st.session_state.history_store[next_rd_key] = combined_pick  # 🎯 실시간 추천 픽을 세션 메모리에 100% 저장
 
     st.markdown(f"**이번회차 지울픽 분석 ( {next_round}회차 )**")
     
@@ -524,6 +534,7 @@ else:
         push_backup()
         st.session_state.records = []
         st.session_state.history_stack = []
+        st.session_state.history_store = {}
         sync_all_records_db([])
         st.cache_data.clear()
         st.rerun()
@@ -549,8 +560,8 @@ else:
         for i in reversed(today_indices):
             if i < 3: continue
             p_sub = records_tuple[:i]
-            res_a_prev = analyze_A_engine_tuple(p_sub, include_history=True)
-            res_b_prev = analyze_B_engine_tuple(p_sub, include_history=True)
+            res_a_prev = analyze_A_engine_tuple(p_sub, include_history=False)
+            res_b_prev = analyze_B_engine_tuple(p_sub, include_history=False)
             res_comb_prev = history_picks.get(i)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
