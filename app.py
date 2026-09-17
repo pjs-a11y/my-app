@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 퐁당 패턴 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 박스 패턴 분석기", page_icon="📦", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -127,30 +127,50 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [퐁당 패턴 전용 연산 알고리즘]
-def analyze_pongdang_pattern(records_tuple):
+# 📦 [순수 박스 패턴 분석 알고리즘]
+def analyze_box_pattern(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 2:
-        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족'}
+    if len(valid) < 3:
+        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족', 'box_type': '기본'}
 
-    last = valid[-1]       # 직전 회차 (N-1)
-    prev = valid[-2]       # 전전 회차 (N-2)
+    n = len(valid)
+    last = valid[-1]      # N-1
+    prev = valid[-2]      # N-2
+    prev2 = valid[-3] if n >= 3 else None   # N-3
+    prev3 = valid[-4] if n >= 4 else None   # N-4
 
-    # 1. 지울 픽: 퐁당 패턴 유지 전제로 직전 회차 조합은 100% 제외
-    avoid_pick = last
-
-    # 2. 추천 픽: 퐁당 유지(전전 회차 조합 채택) 또는 성향 완전 교대 조합
-    if prev != last:
-        rec_pick = prev    # A -> B -> A 퐁당 흐름 유지
+    # 1) 2-2 박스완성 (A A B B -> A 전환 타이밍)
+    if n >= 4 and prev == last and prev2 != prev and prev3 == prev2:
+        rec_pick = prev2
+        avoid_pick = last
+        box_type = "2-2 박스완성 (전환)"
+    # 2) 2-2 박스연장 (A A B -> B 2타 유지)
+    elif n >= 3 and prev == last and prev2 != prev:
+        rec_pick = last
+        avoid_pick = OPPOSITE_MAP.get(last, '좌삼')
+        box_type = "2-2 박스연장 (B2타)"
+    # 3) 박스 꺾임 타이밍 (A A B -> B 2타 진행)
+    elif n >= 3 and prev != last and prev2 == prev:
+        rec_pick = last
+        avoid_pick = prev
+        box_type = "박스 꺾임 (B2타)"
+    # 4) 1-1 교대 박스
+    elif n >= 4 and prev != last and prev2 != prev and prev3 == prev2:
+        rec_pick = prev
+        avoid_pick = last
+        box_type = "1-1 교대박스"
     else:
-        rec_pick = OPPOSITE_MAP.get(last, '우삼')  # 꺾이는 퐁당 시작점
+        rec_pick = OPPOSITE_MAP.get(last, '우삼')
+        avoid_pick = last
+        box_type = "일반 박스흐름"
 
     pattern_display = " ➔ ".join(valid[-4:])
 
     return {
         'rec': rec_pick,
         'avoid': avoid_pick,
-        'pattern_str': pattern_display
+        'pattern_str': pattern_display,
+        'box_type': box_type
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
@@ -172,7 +192,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_pongdang_pattern(past_sub)
+            res = analyze_box_pattern(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -274,7 +294,7 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 퐁당 패턴 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 박스 패턴 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -284,7 +304,7 @@ else:
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 퐁당 패턴 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 박스 패턴 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -309,16 +329,17 @@ else:
 
     st.markdown("---")
 
-    curr_res = analyze_pongdang_pattern(records_tuple)
+    curr_res = analyze_box_pattern(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 퐁당 전용 분석 ( {next_round}회차 )**")
+    st.markdown(f"**이번회차 박스 패턴 분석 ( {next_round}회차 )**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `[퐁당 유지 우선]`")
-    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `[직전 동일 제외]`")
+    st.markdown(f"📦 **박스 진행 형태**: `{curr_res['box_type']}`")
+    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
+    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -386,7 +407,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (퐁당 대조 리스트)**")
+    st.markdown("**오늘 세부 결과 (박스 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
