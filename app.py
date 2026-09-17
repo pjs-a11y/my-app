@@ -248,29 +248,61 @@ def analyze_B_engine_tuple(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
 
-# 🛡️ [교집합 방어 적용] A/B 엔진 종합 결과 조합 분석
-def calculate_combined_betting_pick(res_a, res_b):
+# 🔍 현재 구간 패턴 자동 감지 (장줄/퐁당 vs 박스/계단)
+def detect_current_pattern_mode(records_tuple):
+    valid = [r[2] for r in records_tuple[-6:] if r[2] in ALL_COMBOS]
+    if len(valid) < 4: return 'A'
+    
+    # 최근 6개 중 장줄/퐁당 연속성 카운트
+    streak_count = 0
+    for i in range(len(valid) - 1):
+        if valid[i] == valid[i+1]: streak_count += 1
+        
+    # 동일 연속이 3개 이상 포함되어 있다면 장줄(A엔진) 우세
+    if streak_count >= 3: return 'A'
+    # 2-2 박스 형태가 보이면 박스(B엔진) 우세
+    return 'B'
+
+# 🎯 [구간 감지 기반 지울 픽 선택] A/B 엔진 종합 결과 조합 분석
+def calculate_combined_betting_pick(records_tuple, res_a, res_b):
     if not res_a or not res_b: return None
     
-    # 1. 종합 추천 픽: 기존 방식 유지 (50:50 가중 평균 점수가 가장 높은 픽)
+    # 1. 종합 추천 픽: 가중 합산 최고 확률 픽
     combined_probs = {}
     for c in ALL_COMBOS:
         combined_probs[c] = (res_a['probs'][c] * 0.5) + (res_b['probs'][c] * 0.5)
     best_combo = max(combined_probs.items(), key=lambda x: x[1])
     
-    # 2. 🛡️ 종합 지울 픽 (교집합 최솟값 방어 알고리즘):
-    # 두 엔진 중 어느 하나라도 나올 가능성(확률)을 높게 본 픽은 지울 픽에서 완전히 탈락시킴
-    # 두 엔진 모두 공통적으로 '가장 안 나올 확률(Min)'을 부여한 픽을 선출
-    min_probs = {}
-    for c in ALL_COMBOS:
-        min_probs[c] = min(res_a['probs'][c], res_b['probs'][c])
-    worst_combo = min(min_probs.items(), key=lambda x: x[1])
+    # 2. 구간 패턴에 맞춰 A엔진 vs B엔진 지울 픽 선택
+    mode = detect_current_pattern_mode(records_tuple)
     
+    if mode == 'A':
+        primary_worst = res_a['worst']
+        primary_engine = "A(장줄) 선택"
+        # 충돌 방어: A 지울 픽이 B에서 추천 1위라면 B 지울 픽으로 우회
+        if primary_worst == res_b['top']:
+            selected_worst = res_b['worst']
+            primary_engine = "B(박스) 방어선택"
+        else:
+            selected_worst = primary_worst
+    else:
+        primary_worst = res_b['worst']
+        primary_engine = "B(박스) 선택"
+        # 충돌 방어: B 지울 픽이 A에서 추천 1위라면 A 지울 픽으로 우회
+        if primary_worst == res_a['top']:
+            selected_worst = res_a['worst']
+            primary_engine = "A(장줄) 방어선택"
+        else:
+            selected_worst = primary_worst
+            
+    worst_prob = combined_probs[selected_worst]
+        
     return {
         'best': best_combo[0],
         'best_prob': best_combo[1],
-        'worst': worst_combo[0],
-        'worst_prob': worst_combo[1]
+        'worst': selected_worst,
+        'worst_prob': worst_prob,
+        'mode_info': primary_engine
     }
 
 @st.cache_data(show_spinner=False)
@@ -401,7 +433,7 @@ else:
 
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
-    combined_pick = calculate_combined_betting_pick(curr_a_res, curr_b_res)
+    combined_pick = calculate_combined_betting_pick(records_tuple, curr_a_res, curr_b_res)
 
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
@@ -427,7 +459,7 @@ else:
     
     if combined_pick:
         st.markdown(f"🔥 **[최종 종합 베팅 픽] 추천: `{combined_pick['best']}` ({ITEM_FULL_MAP[combined_pick['best']]})** `종합확률 {combined_pick['best_prob']:.1f}%`")
-        st.markdown(f"   ⛔ **[최종 종합 지울 픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `위험도 최소 {combined_pick['worst_prob']:.1f}%`")
+        st.markdown(f"   ⛔ **[최종 종합 지울 픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `[{combined_pick['mode_info']}]`")
         st.markdown(" ")
 
     if curr_a_res:
