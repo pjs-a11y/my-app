@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 초고속 A/B 패턴 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 초고속 지울픽 전용 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -150,7 +150,6 @@ def get_historical_pattern_weights(records_tuple, pattern_len=3):
 
     return {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
 
-# 🅰️ [A 엔진: 장줄 및 단순 퐁당 분석]
 def calculate_score_A_engine(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50.0, val2: 50.0}
@@ -202,7 +201,6 @@ def analyze_A_engine_tuple(records_tuple, include_history=False):
 
     return {'top': sorted_combos[0][0], 'top_prob': sorted_combos[0][1], 'worst': sorted_combos[-1][0], 'worst_prob': sorted_combos[-1][1], 'probs': norm_probs}
 
-# 🅱️ [B 엔진: 박스 및 계단 패턴 분석]
 def calculate_score_B_engine(stream, val1, val2):
     n = len(stream)
     if n < 3: return {val1: 50.0, val2: 50.0}
@@ -259,56 +257,63 @@ def detect_current_pattern_mode(records_tuple):
     if streak_count >= 3: return 'A'
     return 'B'
 
-def calculate_combined_betting_pick(records_tuple, res_a, res_b):
+# 🎯 [성공/실패 가변 적용] 종합 지울픽 전용 분석 알고리즘
+def calculate_combined_avoid_pick(records_tuple, res_a, res_b):
     if not res_a or not res_b: return None
-    
-    combined_probs = {}
-    for c in ALL_COMBOS:
-        combined_probs[c] = (res_a['probs'][c] * 0.5) + (res_b['probs'][c] * 0.5)
-    best_combo = max(combined_probs.items(), key=lambda x: x[1])
     
     mode = detect_current_pattern_mode(records_tuple)
     
-    if mode == 'A':
-        primary_worst = res_a['worst']
-        primary_engine = "A(장줄) 선택"
-        if primary_worst == res_b['top']:
-            selected_worst = res_b['worst']
-            primary_engine = "B(박스) 방어선택"
-        else:
-            selected_worst = primary_worst
-    else:
-        primary_worst = res_b['worst']
-        primary_engine = "B(박스) 선택"
-        if primary_worst == res_a['top']:
-            selected_worst = res_a['worst']
-            primary_engine = "A(장줄) 방어선택"
-        else:
-            selected_worst = primary_worst
-            
-    worst_prob = combined_probs[selected_worst]
+    # 직전 회차 지울 픽 성공/실패 여부 체크
+    last_success = True
+    if len(records_tuple) >= 5:
+        prev_sub = records_tuple[:-1]
+        prev_a = analyze_A_engine_tuple(prev_sub, include_history=False)
+        prev_b = analyze_B_engine_tuple(prev_sub, include_history=False)
         
+        # 4회차 전 시점 기본 계산 모드
+        prev_mode = detect_current_pattern_mode(prev_sub)
+        prev_avoid = prev_a['worst'] if prev_mode == 'A' else prev_b['worst']
+        
+        actual_last = records_tuple[-1][2]
+        if actual_last in ALL_COMBOS and prev_avoid == actual_last:
+            last_success = False  # 직전 지울 픽 실패! (나와버림)
+
+    # 1. 직전 지울 픽이 성공했을 때 ➔ 기존 모드 우선 신뢰
+    if last_success:
+        if mode == 'A':
+            target_worst = res_a['worst']
+            info = "A(장줄) 순항"
+            if target_worst == res_b['top']:
+                target_worst = res_b['worst']
+                info = "B(박스) 방어선택"
+        else:
+            target_worst = res_b['worst']
+            info = "B(박스) 순항"
+            if target_worst == res_a['top']:
+                target_worst = res_a['worst']
+                info = "A(장줄) 방어선택"
+
+    # 2. 직전 지울 픽이 실패했을 때 ➔ 즉시 반대 엔진으로 스와프(Swap)하여 패턴 전환 대응
+    else:
+        if mode == 'A':
+            target_worst = res_b['worst']
+            info = "⚡실패반전 B선택"
+        else:
+            target_worst = res_a['worst']
+            info = "⚡실패반전 A선택"
+            
     return {
-        'best': best_combo[0],
-        'best_prob': best_combo[1],
-        'worst': selected_worst,
-        'worst_prob': worst_prob,
-        'mode_info': primary_engine
+        'worst': target_worst,
+        'mode_info': info
     }
 
-# 📊 종합 통계 연산 (A, B, 종합 베팅픽, 종합 지울픽 + 최다 연승/연패 계산)
 @st.cache_data(show_spinner=False)
 def calculate_ab_stats_clean(records_tuple, target_date=None):
     n = len(records_tuple)
     if n < 4: return None
     tot_a, tot_b, tot_comb = 0, 0, 0
-    a_win, b_win, comb_win = 0, 0, 0
     a_avoid_win, b_avoid_win, comb_avoid_win = 0, 0, 0
 
-    # 연승/연패 추적용 변수
-    comb_win_streak, max_comb_win_streak = 0, 0
-    comb_lose_streak, max_comb_lose_streak = 0, 0
-    
     comb_avoid_win_streak, max_comb_avoid_win_streak = 0, 0
     comb_avoid_lose_streak, max_comb_avoid_lose_streak = 0, 0
 
@@ -320,31 +325,17 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         past_sub = records_tuple[:i]
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
-        res_comb = calculate_combined_betting_pick(past_sub, res_a, res_b)
+        res_comb = calculate_combined_avoid_pick(past_sub, res_a, res_b)
 
         if res_a:
             tot_a += 1
-            if res_a['top'] == act: a_win += 1
             if res_a['worst'] != act: a_avoid_win += 1
         if res_b:
             tot_b += 1
-            if res_b['top'] == act: b_win += 1
             if res_b['worst'] != act: b_avoid_win += 1
             
         if res_comb:
             tot_comb += 1
-            # 종합 베팅픽 통계
-            if res_comb['best'] == act:
-                comb_win += 1
-                comb_win_streak += 1
-                comb_lose_streak = 0
-                if comb_win_streak > max_comb_win_streak: max_comb_win_streak = comb_win_streak
-            else:
-                comb_lose_streak += 1
-                comb_win_streak = 0
-                if comb_lose_streak > max_comb_lose_streak: max_comb_lose_streak = comb_lose_streak
-                
-            # 종합 지울픽 통계
             if res_comb['worst'] != act:
                 comb_avoid_win += 1
                 comb_avoid_win_streak += 1
@@ -356,15 +347,13 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
                 if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
 
     return {
-        'tot_a': tot_a, 'a_win': a_win, 'a_lose': tot_a - a_win, 'a_rate': (a_win/tot_a*100.0) if tot_a > 0 else 0.0,
-        'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
-        'tot_b': tot_b, 'b_win': b_win, 'b_lose': tot_b - b_win, 'b_rate': (b_win/tot_b*100.0) if tot_b > 0 else 0.0,
-        'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0,
+        'tot_a': tot_a, 'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
+        'tot_b': tot_b, 'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0,
         'tot_comb': tot_comb, 
-        'comb_win': comb_win, 'comb_lose': tot_comb - comb_win, 'comb_rate': (comb_win/tot_comb*100.0) if tot_comb > 0 else 0.0,
-        'comb_avoid_win': comb_avoid_win, 'comb_avoid_lose': tot_comb - comb_avoid_win, 'comb_avoid_rate': (comb_avoid_win/tot_comb*100.0) if tot_comb > 0 else 0.0,
-        'max_comb_win_streak': max_comb_win_streak, 'max_comb_lose_streak': max_comb_lose_streak,
-        'max_comb_avoid_win_streak': max_comb_avoid_win_streak, 'max_comb_avoid_lose_streak': max_comb_avoid_lose_streak
+        'comb_avoid_win': comb_avoid_win, 'comb_avoid_lose': tot_comb - comb_avoid_win, 
+        'comb_avoid_rate': (comb_avoid_win/tot_comb*100.0) if tot_comb > 0 else 0.0,
+        'max_comb_avoid_win_streak': max_comb_avoid_win_streak, 
+        'max_comb_avoid_lose_streak': max_comb_avoid_lose_streak
     }
 
 if "records" not in st.session_state:
@@ -439,66 +428,59 @@ else:
 
     recent_stat = calculate_ab_stats_clean(records_tuple)
     recent_cnt = len(records)
-    st.markdown(f"**누적 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
+    st.markdown(f"**누적 지울픽 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
-        st.markdown(f"🔥 **종합 베팅픽 적중률 : {recent_stat['comb_win']}승 {recent_stat['comb_lose']}패 (승률 {recent_stat['comb_rate']:.1f}%)**")
-        st.markdown(f"⛔ **종합 지울픽 성공률 : {recent_stat['comb_avoid_win']}승 {recent_stat['comb_avoid_lose']}패 (승률 {recent_stat['comb_avoid_rate']:.1f}%)**")
-        st.markdown(f"🅰️ A (장줄/퐁당 전용) 추천 적중률 : {recent_stat['a_win']}승 {recent_stat['a_lose']}패 (승률 {recent_stat['a_rate']:.1f}%) | 지울 픽 성공률 {recent_stat['a_avoid_rate']:.1f}%")
-        st.markdown(f"🅱️ B (박스/계단 전용) 추천 적중률 : {recent_stat['b_win']}승 {recent_stat['b_lose']}패 (승률 {recent_stat['b_rate']:.1f}%) | 지울 픽 성공률 {recent_stat['b_avoid_rate']:.1f}%")
+        st.markdown(f"⛔ **종합 지울픽 성공률 : {recent_stat['comb_avoid_win']}승 {recent_stat['comb_avoid_lose']}패 (성공률 {recent_stat['comb_avoid_rate']:.1f}%)**")
+        st.markdown(f"🅰️ A 지울픽 성공률 : {recent_stat['a_avoid_win']}승 {recent_stat['a_avoid_lose']}패 ({recent_stat['a_avoid_rate']:.1f}%)")
+        st.markdown(f"🅱️ B 지울픽 성공률 : {recent_stat['b_avoid_win']}승 {recent_stat['b_avoid_lose']}패 ({recent_stat['b_avoid_rate']:.1f}%)")
 
     st.markdown("---")
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat = calculate_ab_stats_clean(records_tuple, target_date=curr_date)
-    st.markdown(f"**오늘 누적 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 지울픽 통계 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"🔥 **종합 베팅픽 적중률 : {today_stat['comb_win']}승 {today_stat['comb_lose']}패 (승률 {today_stat['comb_rate']:.1f}%)**")
-        st.markdown(f"   🏆 **종합 베팅픽 오늘 최고 성적 : 최다 {today_stat['max_comb_win_streak']}연승 / 최다 {today_stat['max_comb_lose_streak']}연패**")
         st.markdown(f"⛔ **종합 지울픽 성공률 : {today_stat['comb_avoid_win']}승 {today_stat['comb_avoid_lose']}패 (성공률 {today_stat['comb_avoid_rate']:.1f}%)**")
-        st.markdown(f"   🛡️ **종합 지울픽 오늘 최고 성적 : 최다 {today_stat['max_comb_avoid_win_streak']}연속 성공 / 최다 {today_stat['max_comb_avoid_lose_streak']}연속 나와버림**")
-        st.markdown(f"🅰️ A (장줄/퐁당 전용) 추천 적중률 : {today_stat['a_win']}승 {today_stat['a_lose']}패 (승률 {today_stat['a_rate']:.1f}%) | 지울 픽 성공률 {today_stat['a_avoid_rate']:.1f}%")
-        st.markdown(f"🅱️ B (박스/계단 전용) 추천 적중률 : {today_stat['b_win']}승 {today_stat['b_lose']}패 (승률 {today_stat['b_rate']:.1f}%) | 지울 픽 성공률 {today_stat['b_avoid_rate']:.1f}%")
+        st.markdown(f"   🛡️ **종합 지울픽 오늘 성적 : 최다 {today_stat['max_comb_avoid_win_streak']}연속 성공 / 최다 {today_stat['max_comb_avoid_lose_streak']}연속 나와버림**")
+        st.markdown(f"🅰️ A 지울픽 성공률 : {today_stat['a_avoid_win']}승 {today_stat['a_avoid_lose']}패 ({today_stat['a_avoid_rate']:.1f}%)")
+        st.markdown(f"🅱️ B 지울픽 성공률 : {today_stat['b_avoid_win']}승 {today_stat['b_avoid_lose']}패 ({today_stat['b_avoid_rate']:.1f}%)")
 
     st.markdown("---")
-
-    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
-    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
-    combined_pick = calculate_combined_betting_pick(records_tuple, curr_a_res, curr_b_res)
 
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
         prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
         prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=False)
-        prev_comb = calculate_combined_betting_pick(prev_sub, prev_a_res, prev_b_res)
+        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a_res, prev_b_res)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
             st.markdown("결과 : **패스(PASS)** ➔ **통계 제외**")
         else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
-            comb_ok = "추천적중 🎯" if prev_comb and prev_comb['best'] == prev_actual else "추천미적중 ❌"
             comb_avoid_ok = "안나옴 성공 🎯" if prev_comb and prev_comb['worst'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_comb:
-                st.markdown(f"🔥 **종합 베팅픽 ({prev_comb['best']}) ➔ {comb_ok}** / ⛔ **종합 지울픽 ({prev_comb['worst']}) ➔ {comb_avoid_ok}**")
+                st.markdown(f"⛔ **종합 지울픽 ({prev_comb['worst']}) ➔ {comb_avoid_ok}**")
 
     st.markdown("---")
 
-    st.markdown(f"**이번회차 A/B 패턴 분석 ( {next_round}회차 )**")
+    curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
+    curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
+    combined_pick = calculate_combined_avoid_pick(records_tuple, curr_a_res, curr_b_res)
+
+    st.markdown(f"**이번회차 지울픽 분석 ( {next_round}회차 )**")
     
     if combined_pick:
-        st.markdown(f"🔥 **[종합 베팅픽] 추천: `{combined_pick['best']}` ({ITEM_FULL_MAP[combined_pick['best']]})** `종합확률 {combined_pick['best_prob']:.1f}%`")
         st.markdown(f"⛔ **[종합 지울픽] 제외: `{combined_pick['worst']}` ({ITEM_FULL_MAP[combined_pick['worst']]})** `[{combined_pick['mode_info']}]`")
         st.markdown(" ")
 
     if curr_a_res:
-        st.markdown(f"🅰️ **[A: 장줄/퐁당] 추천: `{curr_a_res['top']}` ({ITEM_FULL_MAP[curr_a_res['top']]})** `확률 {curr_a_res['top_prob']:.1f}%`")
-        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
+        st.markdown(f"🅰️ **[A 지울픽] 제외: `{curr_a_res['worst']}` ({ITEM_FULL_MAP[curr_a_res['worst']]})** `확률 {curr_a_res['worst_prob']:.1f}%`")
     st.markdown(" ")
     if curr_b_res:
-        st.markdown(f"🅱️ **[B: 박스/계단] 추천: `{curr_b_res['top']}` ({ITEM_FULL_MAP[curr_b_res['top']]})** `확률 {curr_b_res['top_prob']:.1f}%`")
-        st.markdown(f"   ⚠️ **지울 픽(안 나올 확률 높음): `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
+        st.markdown(f"🅱️ **[B 지울픽] 제외: `{curr_b_res['worst']}` ({ITEM_FULL_MAP[curr_b_res['worst']]})** `확률 {curr_b_res['worst_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -565,7 +547,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (A/B 적중 리스트)**")
+    st.markdown("**오늘 세부 결과 (지울픽 적중 리스트)**")
     if len(records_tuple) >= 4:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
@@ -573,20 +555,23 @@ else:
             if i < 3: continue
             p_sub = records_tuple[:i]
             res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
-            res_comb_prev = calculate_combined_betting_pick(p_sub, res_a_prev, res_b_prev)
+            res_comb_prev = calculate_combined_avoid_pick(p_sub, res_a_prev, res_b_prev)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
             
-            comb_match = "적중 🎯" if res_comb_prev and res_comb_prev['best'] == act_item else "미적중"
             comb_avoid_match = "성공 🎯" if res_comb_prev and res_comb_prev['worst'] != act_item else "나와버림 ❌"
+            a_avoid_match = "성공 🎯" if res_a_prev and res_a_prev['worst'] != act_item else "나와버림 ❌"
+            b_avoid_match = "성공 🎯" if res_b_prev and res_b_prev['worst'] != act_item else "나와버림 ❌"
             
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "종합 추천/지울픽": f"{res_comb_prev['best']} / {res_comb_prev['worst']}" if res_comb_prev else "-", 
-                "종합 적중/지움": f"{comb_match} / {comb_avoid_match}",
-                "A 추천/지울픽": f"{res_a_prev['top']} / {res_a_prev['worst']}" if res_a_prev else "-",
-                "B 추천/지울픽": f"{res_b_prev['top']} / {res_b_prev['worst']}" if res_b_prev else "-"
+                "종합 지울픽": f"{res_comb_prev['worst']}" if res_comb_prev else "-", 
+                "종합 결과": comb_avoid_match,
+                "A 지울픽": f"{res_a_prev['worst']}" if res_a_prev else "-",
+                "A 결과": a_avoid_match,
+                "B 지울픽": f"{res_b_prev['worst']}" if res_b_prev else "-",
+                "B 결과": b_avoid_match
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
