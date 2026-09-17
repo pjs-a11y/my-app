@@ -288,7 +288,7 @@ def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_faile
         'mode_info': info
     }
 
-# 📊 [수정] 인덱스 시점을 i-1로 교정하여 미래 결과 참조 원천 차단
+# 📊 [버그 원천 차단] 과거 시점 슬라이싱 기준 완벽 교정
 @st.cache_data(show_spinner=False)
 def calculate_all_history_and_stats(records_tuple, target_date=None):
     n = len(records_tuple)
@@ -301,24 +301,24 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
     comb_avoid_lose_streak, max_comb_avoid_lose_streak = 0, 0
 
     prev_comb_failed = False
-    history_picks = {}  # {인덱스: 해당 회차가 시작할 때 추천했던 지울픽 객체}
+    history_picks = {} 
 
+    # 📌 n번째 회차 분석을 위해 3부터 n-1 시점까지 순차 처리
     for i in range(3, n):
         act = records_tuple[i][2]
         
-        # 📌 핵심 교정: i번째 회차 분석 시 i번째 결과는 제외하고 i-1 시점까지의 과거 데이터만 입력
+        # 🔑 [핵심 수정] i번째 결과를 제외한 [0 ~ i-1] 데이터만 잘라서 지울픽 결정 (미래 결과 대입 원천 차단)
         past_sub = records_tuple[:i]
         
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
         
-        # 이전 회차의 실패 여부를 전달받아 지울픽 결정
         res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
         history_picks[i] = res_comb
 
         if act not in ALL_COMBOS: continue
 
-        # 통계 집계 (i번째 회차의 실제 결과 act와 대조)
+        # 통계 집계
         if not target_date or records_tuple[i][0] == target_date:
             if res_a:
                 tot_a += 1
@@ -339,7 +339,7 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
                     comb_avoid_win_streak = 0
                     if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
 
-        # 다음 회차(i+1회차)로 넘어갈 때 사용할 실패 여부 갱신
+        # 다음 회차용 실패 여부 업데이트
         if res_comb and act in ALL_COMBOS:
             prev_comb_failed = (res_comb['worst'] == act)
 
@@ -448,7 +448,7 @@ else:
 
     st.markdown("---")
 
-    # 📌 직전회차 검증: 당시 실제 추천했던 지울픽(history_picks[last_idx])을 그대로 표출
+    # 📌 직전회차 검증: 당시 실제 추천했던 지울픽(history_picks[last_idx])을 변함없이 표출
     if len(records_tuple) >= 4 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_comb = history_picks.get(last_idx)
