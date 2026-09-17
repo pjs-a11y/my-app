@@ -177,7 +177,7 @@ def calculate_score_A_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_A_engine_tuple(records_tuple, include_history=False):
+def analyze_A_engine_tuple(records_tuple, include_history=True):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 2: return None
     s_s = calculate_score_A_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -222,7 +222,7 @@ def calculate_score_B_engine(stream, val1, val2):
     tot = s1 + s2
     return {val1: (s1/tot)*100.0, val2: (s2/tot)*100.0}
 
-def analyze_B_engine_tuple(records_tuple, include_history=False):
+def analyze_B_engine_tuple(records_tuple, include_history=True):
     valid = [r for r in records_tuple[-30:] if r[2] in ALL_COMBOS]
     if len(valid) < 3: return None
     s_s = calculate_score_B_engine([ITEM_MAP[r[2]][0] for r in valid], '우', '좌')
@@ -287,7 +287,7 @@ def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_faile
         'mode_info': info
     }
 
-# 📊 [실시간 완전 연산] 캐시 제거 및 정밀 루프 연산
+# 📊 통계 및 과거 추천 픽 완전 일치 연산 (include_history=True 100% 동기화)
 def calculate_all_history_and_stats(records_tuple, target_date=None):
     n = len(records_tuple)
     if n < 4: return None, {}
@@ -304,11 +304,11 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
     for i in range(3, n):
         act = records_tuple[i][2]
         
-        # 정확히 i회차가 시작하기 전까지(0~i-1)의 시점만 슬라이스
+        # 🎯 과거 회차 추천 당시와 100% 똑같이 include_history=True 옵션 적용
         past_sub = records_tuple[:i]
         
-        res_a = analyze_A_engine_tuple(past_sub, include_history=False)
-        res_b = analyze_B_engine_tuple(past_sub, include_history=False)
+        res_a = analyze_A_engine_tuple(past_sub, include_history=True)
+        res_b = analyze_B_engine_tuple(past_sub, include_history=True)
         
         res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
         history_picks[i] = res_comb
@@ -443,7 +443,6 @@ else:
 
     st.markdown("---")
 
-    # 📌 직전회차 지울픽 표출: 직전회차(마지막 인덱스-1)가 시작할 때 추천했던 지울픽을 무조건 정확히 고정 출력
     if len(records_tuple) >= 4 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_comb = history_picks.get(last_idx)
@@ -550,7 +549,8 @@ else:
         for i in reversed(today_indices):
             if i < 3: continue
             p_sub = records_tuple[:i]
-            res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
+            res_a_prev = analyze_A_engine_tuple(p_sub, include_history=True)
+            res_b_prev = analyze_B_engine_tuple(p_sub, include_history=True)
             res_comb_prev = history_picks.get(i)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
