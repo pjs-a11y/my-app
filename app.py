@@ -257,26 +257,13 @@ def detect_current_pattern_mode(records_tuple):
     if streak_count >= 3: return 'A'
     return 'B'
 
-# 🎯 [성공/실패 대응 & 인덱스 고정] 종합 지울픽 연산 함수
-def calculate_combined_avoid_pick(records_tuple, res_a, res_b, check_prev_fail=True):
+# 🎯 [단순 고정 알고리즘] 재귀를 없애 인덱스 꼬임을 100% 원천 차단
+def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_failed=False):
     if not res_a or not res_b: return None
     
     mode = detect_current_pattern_mode(records_tuple)
-    
-    last_success = True
-    if check_prev_fail and len(records_tuple) >= 5:
-        prev_sub = records_tuple[:-1]
-        prev_a = analyze_A_engine_tuple(prev_sub, include_history=False)
-        prev_b = analyze_B_engine_tuple(prev_sub, include_history=False)
-        
-        # 이전 회차 기준 지울픽을 단일 추적하여 재귀 무한루프 및 인덱스 꼬임 방지
-        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a, prev_b, check_prev_fail=False)
-        
-        actual_last = records_tuple[-1][2]
-        if prev_comb and actual_last in ALL_COMBOS and prev_comb['worst'] == actual_last:
-            last_success = False  # 직전 지울픽 실패 (나와버림)
 
-    if last_success:
+    if not prev_failed:
         if mode == 'A':
             target_worst = res_a['worst']
             info = "A(장줄) 선택"
@@ -302,54 +289,71 @@ def calculate_combined_avoid_pick(records_tuple, res_a, res_b, check_prev_fail=T
         'mode_info': info
     }
 
+# 📊 통계 및 순차 계산 로직 (인덱스 꼬임 방지 단일 루프)
 @st.cache_data(show_spinner=False)
-def calculate_ab_stats_clean(records_tuple, target_date=None):
+def calculate_all_history_and_stats(records_tuple, target_date=None):
     n = len(records_tuple)
-    if n < 4: return None
+    if n < 4: return None, None
+    
     tot_a, tot_b, tot_comb = 0, 0, 0
     a_avoid_win, b_avoid_win, comb_avoid_win = 0, 0, 0
 
     comb_avoid_win_streak, max_comb_avoid_win_streak = 0, 0
     comb_avoid_lose_streak, max_comb_avoid_lose_streak = 0, 0
 
+    prev_comb_failed = False
+    history_picks = {}  # {인덱스: 지울픽 결과객체}
+
     for i in range(3, n):
         act = records_tuple[i][2]
-        if act not in ALL_COMBOS: continue
-        if target_date and records_tuple[i][0] != target_date: continue
-
         past_sub = records_tuple[:i]
+        
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
-        res_comb = calculate_combined_avoid_pick(past_sub, res_a, res_b, check_prev_fail=True)
+        
+        # 순차적으로 직전 실패 여부를 전달하여 재귀 계산을 원천 배제
+        res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
+        history_picks[i] = res_comb
 
-        if res_a:
-            tot_a += 1
-            if res_a['worst'] != act: a_avoid_win += 1
-        if res_b:
-            tot_b += 1
-            if res_b['worst'] != act: b_avoid_win += 1
-            
-        if res_comb:
-            tot_comb += 1
-            if res_comb['worst'] != act:
-                comb_avoid_win += 1
-                comb_avoid_win_streak += 1
-                comb_avoid_lose_streak = 0
-                if comb_avoid_win_streak > max_comb_avoid_win_streak: max_comb_avoid_win_streak = comb_avoid_win_streak
-            else:
-                comb_avoid_lose_streak += 1
-                comb_avoid_win_streak = 0
-                if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
+        if act not in ALL_COMBOS: continue
 
-    return {
+        # 통계집계
+        if not target_date or records_tuple[i][0] == target_date:
+            if res_a:
+                tot_a += 1
+                if res_a['worst'] != act: a_avoid_win += 1
+            if res_b:
+                tot_b += 1
+                if res_b['worst'] != act: b_avoid_win += 1
+                
+            if res_comb:
+                tot_comb += 1
+                if res_comb['worst'] != act:
+                    comb_avoid_win += 1
+                    comb_avoid_win_streak += 1
+                    comb_avoid_lose_streak = 0
+                    if comb_avoid_win_streak > max_comb_avoid_win_streak: max_comb_avoid_win_streak = comb_avoid_win_streak
+                else:
+                    comb_avoid_lose_streak += 1
+                    comb_avoid_win_streak = 0
+                    if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
+
+        # 다음 회차 전달용 실패 여부 갱신
+        if res_comb and act in ALL_COMBOS:
+            prev_comb_failed = (res_comb['worst'] == act)
+
+    stats = {
         'tot_a': tot_a, 'a_avoid_win': a_avoid_win, 'a_avoid_lose': tot_a - a_avoid_win, 'a_avoid_rate': (a_avoid_win/tot_a*100.0) if tot_a > 0 else 0.0,
         'tot_b': tot_b, 'b_avoid_win': b_avoid_win, 'b_avoid_lose': tot_b - b_avoid_win, 'b_avoid_rate': (b_avoid_win/tot_b*100.0) if tot_b > 0 else 0.0,
         'tot_comb': tot_comb, 
         'comb_avoid_win': comb_avoid_win, 'comb_avoid_lose': tot_comb - comb_avoid_win, 
         'comb_avoid_rate': (comb_avoid_win/tot_comb*100.0) if tot_comb > 0 else 0.0,
         'max_comb_avoid_win_streak': max_comb_avoid_win_streak, 
-        'max_comb_avoid_lose_streak': max_comb_avoid_lose_streak
+        'max_comb_avoid_lose_streak': max_comb_avoid_lose_streak,
+        'last_failed': prev_comb_failed
     }
+    
+    return stats, history_picks
 
 if "records" not in st.session_state:
     st.session_state.records = load_data()
@@ -421,7 +425,7 @@ else:
 
     st.markdown("---")
 
-    recent_stat = calculate_ab_stats_clean(records_tuple)
+    recent_stat, history_picks = calculate_all_history_and_stats(records_tuple)
     recent_cnt = len(records)
     st.markdown(f"**누적 지울픽 통계 (최근 {recent_cnt}개 기준 / 패스 회차 제외)**")
     if recent_stat:
@@ -433,7 +437,7 @@ else:
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
-    today_stat = calculate_ab_stats_clean(records_tuple, target_date=curr_date)
+    today_stat, _ = calculate_all_history_and_stats(records_tuple, target_date=curr_date)
     st.markdown(f"**오늘 누적 지울픽 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"⛔ **종합 지울픽 성공률 : {today_stat['comb_avoid_win']}승 {today_stat['comb_avoid_lose']}패 (성공률 {today_stat['comb_avoid_rate']:.1f}%)**")
@@ -443,11 +447,10 @@ else:
 
     st.markdown("---")
 
-    if len(records_tuple) >= 4:
-        prev_sub = records_tuple[:-1]
-        prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
-        prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=False)
-        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a_res, prev_b_res, check_prev_fail=True)
+    # 📌 직전회차 검증: 역사적 시점 기록(history_picks) 그대로 100% 매칭 표출
+    if len(records_tuple) >= 4 and history_picks:
+        last_idx = len(records_tuple) - 1
+        prev_comb = history_picks.get(last_idx)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
@@ -463,7 +466,10 @@ else:
 
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
-    combined_pick = calculate_combined_avoid_pick(records_tuple, curr_a_res, curr_b_res, check_prev_fail=True)
+    
+    # 이번 회차 지울픽 연산 (직전 회차의 실제 실패 여부를 전달)
+    last_failed_status = recent_stat['last_failed'] if recent_stat else False
+    combined_pick = calculate_combined_avoid_pick_simple(records_tuple, curr_a_res, curr_b_res, prev_failed=last_failed_status)
 
     st.markdown(f"**이번회차 지울픽 분석 ( {next_round}회차 )**")
     
@@ -543,14 +549,14 @@ else:
     st.markdown("---")
 
     st.markdown("**오늘 세부 결과 (지울픽 적중 리스트)**")
-    if len(records_tuple) >= 4:
+    if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
         for i in reversed(today_indices):
             if i < 3: continue
             p_sub = records_tuple[:i]
             res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
-            res_comb_prev = calculate_combined_avoid_pick(p_sub, res_a_prev, res_b_prev, check_prev_fail=True)
+            res_comb_prev = history_picks.get(i)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
