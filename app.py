@@ -127,7 +127,6 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-@st.cache_data(show_spinner=False)
 def get_historical_pattern_weights(records_tuple, pattern_len=3):
     results = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(results) <= pattern_len:
@@ -288,11 +287,10 @@ def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_faile
         'mode_info': info
     }
 
-# 📊 [버그 원천 차단] 과거 시점 슬라이싱 기준 완벽 교정
-@st.cache_data(show_spinner=False)
+# 📊 [실시간 완전 연산] 캐시 제거 및 정밀 루프 연산
 def calculate_all_history_and_stats(records_tuple, target_date=None):
     n = len(records_tuple)
-    if n < 4: return None, None
+    if n < 4: return None, {}
     
     tot_a, tot_b, tot_comb = 0, 0, 0
     a_avoid_win, b_avoid_win, comb_avoid_win = 0, 0, 0
@@ -303,11 +301,10 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
     prev_comb_failed = False
     history_picks = {} 
 
-    # 📌 n번째 회차 분석을 위해 3부터 n-1 시점까지 순차 처리
     for i in range(3, n):
         act = records_tuple[i][2]
         
-        # 🔑 [핵심 수정] i번째 결과를 제외한 [0 ~ i-1] 데이터만 잘라서 지울픽 결정 (미래 결과 대입 원천 차단)
+        # 정확히 i회차가 시작하기 전까지(0~i-1)의 시점만 슬라이스
         past_sub = records_tuple[:i]
         
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
@@ -318,7 +315,6 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
 
         if act not in ALL_COMBOS: continue
 
-        # 통계 집계
         if not target_date or records_tuple[i][0] == target_date:
             if res_a:
                 tot_a += 1
@@ -339,7 +335,6 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
                     comb_avoid_win_streak = 0
                     if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
 
-        # 다음 회차용 실패 여부 업데이트
         if res_comb and act in ALL_COMBOS:
             prev_comb_failed = (res_comb['worst'] == act)
 
@@ -448,7 +443,7 @@ else:
 
     st.markdown("---")
 
-    # 📌 직전회차 검증: 당시 실제 추천했던 지울픽(history_picks[last_idx])을 변함없이 표출
+    # 📌 직전회차 지울픽 표출: 직전회차(마지막 인덱스-1)가 시작할 때 추천했던 지울픽을 무조건 정확히 고정 출력
     if len(records_tuple) >= 4 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_comb = history_picks.get(last_idx)
