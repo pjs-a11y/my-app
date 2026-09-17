@@ -257,7 +257,6 @@ def detect_current_pattern_mode(records_tuple):
     if streak_count >= 3: return 'A'
     return 'B'
 
-# 🎯 [단순 고정 알고리즘] 재귀를 없애 인덱스 꼬임을 100% 원천 차단
 def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_failed=False):
     if not res_a or not res_b: return None
     
@@ -289,7 +288,7 @@ def calculate_combined_avoid_pick_simple(records_tuple, res_a, res_b, prev_faile
         'mode_info': info
     }
 
-# 📊 통계 및 순차 계산 로직 (인덱스 꼬임 방지 단일 루프)
+# 📊 [수정] 인덱스 시점을 i-1로 교정하여 미래 결과 참조 원천 차단
 @st.cache_data(show_spinner=False)
 def calculate_all_history_and_stats(records_tuple, target_date=None):
     n = len(records_tuple)
@@ -302,22 +301,24 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
     comb_avoid_lose_streak, max_comb_avoid_lose_streak = 0, 0
 
     prev_comb_failed = False
-    history_picks = {}  # {인덱스: 지울픽 결과객체}
+    history_picks = {}  # {인덱스: 해당 회차가 시작할 때 추천했던 지울픽 객체}
 
     for i in range(3, n):
         act = records_tuple[i][2]
+        
+        # 📌 핵심 교정: i번째 회차 분석 시 i번째 결과는 제외하고 i-1 시점까지의 과거 데이터만 입력
         past_sub = records_tuple[:i]
         
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
         
-        # 순차적으로 직전 실패 여부를 전달하여 재귀 계산을 원천 배제
+        # 이전 회차의 실패 여부를 전달받아 지울픽 결정
         res_comb = calculate_combined_avoid_pick_simple(past_sub, res_a, res_b, prev_failed=prev_comb_failed)
         history_picks[i] = res_comb
 
         if act not in ALL_COMBOS: continue
 
-        # 통계집계
+        # 통계 집계 (i번째 회차의 실제 결과 act와 대조)
         if not target_date or records_tuple[i][0] == target_date:
             if res_a:
                 tot_a += 1
@@ -338,7 +339,7 @@ def calculate_all_history_and_stats(records_tuple, target_date=None):
                     comb_avoid_win_streak = 0
                     if comb_avoid_lose_streak > max_comb_avoid_lose_streak: max_comb_avoid_lose_streak = comb_avoid_lose_streak
 
-        # 다음 회차 전달용 실패 여부 갱신
+        # 다음 회차(i+1회차)로 넘어갈 때 사용할 실패 여부 갱신
         if res_comb and act in ALL_COMBOS:
             prev_comb_failed = (res_comb['worst'] == act)
 
@@ -447,7 +448,7 @@ else:
 
     st.markdown("---")
 
-    # 📌 직전회차 검증: 역사적 시점 기록(history_picks) 그대로 100% 매칭 표출
+    # 📌 직전회차 검증: 당시 실제 추천했던 지울픽(history_picks[last_idx])을 그대로 표출
     if len(records_tuple) >= 4 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_comb = history_picks.get(last_idx)
@@ -467,7 +468,6 @@ else:
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
     
-    # 이번 회차 지울픽 연산 (직전 회차의 실제 실패 여부를 전달)
     last_failed_status = recent_stat['last_failed'] if recent_stat else False
     combined_pick = calculate_combined_avoid_pick_simple(records_tuple, curr_a_res, curr_b_res, prev_failed=last_failed_status)
 
