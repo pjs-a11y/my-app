@@ -59,7 +59,7 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
-MAX_DATA_SIZE = 3000
+MAX_DATA_SIZE = 2000
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
 ITEM_MAP = {
@@ -257,7 +257,7 @@ def detect_current_pattern_mode(records_tuple):
     if streak_count >= 3: return 'A'
     return 'B'
 
-# 🎯 [인덱스 절대 동기화] 종합 지울픽 연산 함수
+# 🎯 [성공/실패 대응 & 인덱스 고정] 종합 지울픽 연산 함수
 def calculate_combined_avoid_pick(records_tuple, res_a, res_b, check_prev_fail=True):
     if not res_a or not res_b: return None
     
@@ -265,17 +265,16 @@ def calculate_combined_avoid_pick(records_tuple, res_a, res_b, check_prev_fail=T
     
     last_success = True
     if check_prev_fail and len(records_tuple) >= 5:
-        # 직전회차 지울픽을 정확한 과거 시점(recursive 호출 방지)으로 독립 연산
         prev_sub = records_tuple[:-1]
         prev_a = analyze_A_engine_tuple(prev_sub, include_history=False)
         prev_b = analyze_B_engine_tuple(prev_sub, include_history=False)
         
-        # 재귀 호출 방지를 위해 check_prev_fail=False 지정
+        # 이전 회차 기준 지울픽을 단일 추적하여 재귀 무한루프 및 인덱스 꼬임 방지
         prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a, prev_b, check_prev_fail=False)
         
         actual_last = records_tuple[-1][2]
         if prev_comb and actual_last in ALL_COMBOS and prev_comb['worst'] == actual_last:
-            last_success = False  # 직전 지울픽 실패(나와버림)
+            last_success = False  # 직전 지울픽 실패 (나와버림)
 
     if last_success:
         if mode == 'A':
@@ -444,7 +443,6 @@ else:
 
     st.markdown("---")
 
-    # 📌 직전회차 검증을 정확한 시점 데이터로 고정 표출
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
         prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
