@@ -257,43 +257,39 @@ def detect_current_pattern_mode(records_tuple):
     if streak_count >= 3: return 'A'
     return 'B'
 
-# 🎯 [성공/실패 가변 적용] 종합 지울픽 전용 분석 알고리즘
-def calculate_combined_avoid_pick(records_tuple, res_a, res_b):
+# 🎯 [인덱스 절대 동기화] 종합 지울픽 연산 함수
+def calculate_combined_avoid_pick(records_tuple, res_a, res_b, check_prev_fail=True):
     if not res_a or not res_b: return None
     
     mode = detect_current_pattern_mode(records_tuple)
     
-    # 직전 회차 지울 픽 성공/실패 여부 체크
     last_success = True
-    if len(records_tuple) >= 5:
+    if check_prev_fail and len(records_tuple) >= 5:
+        # 직전회차 지울픽을 정확한 과거 시점(recursive 호출 방지)으로 독립 연산
         prev_sub = records_tuple[:-1]
         prev_a = analyze_A_engine_tuple(prev_sub, include_history=False)
         prev_b = analyze_B_engine_tuple(prev_sub, include_history=False)
         
-        # 4회차 전 시점 기본 계산 모드
-        prev_mode = detect_current_pattern_mode(prev_sub)
-        prev_avoid = prev_a['worst'] if prev_mode == 'A' else prev_b['worst']
+        # 재귀 호출 방지를 위해 check_prev_fail=False 지정
+        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a, prev_b, check_prev_fail=False)
         
         actual_last = records_tuple[-1][2]
-        if actual_last in ALL_COMBOS and prev_avoid == actual_last:
-            last_success = False  # 직전 지울 픽 실패! (나와버림)
+        if prev_comb and actual_last in ALL_COMBOS and prev_comb['worst'] == actual_last:
+            last_success = False  # 직전 지울픽 실패(나와버림)
 
-    # 1. 직전 지울 픽이 성공했을 때 ➔ 기존 모드 우선 신뢰
     if last_success:
         if mode == 'A':
             target_worst = res_a['worst']
-            info = "A(장줄) 순항"
+            info = "A(장줄) 선택"
             if target_worst == res_b['top']:
                 target_worst = res_b['worst']
                 info = "B(박스) 방어선택"
         else:
             target_worst = res_b['worst']
-            info = "B(박스) 순항"
+            info = "B(박스) 선택"
             if target_worst == res_a['top']:
                 target_worst = res_a['worst']
                 info = "A(장줄) 방어선택"
-
-    # 2. 직전 지울 픽이 실패했을 때 ➔ 즉시 반대 엔진으로 스와프(Swap)하여 패턴 전환 대응
     else:
         if mode == 'A':
             target_worst = res_b['worst']
@@ -325,7 +321,7 @@ def calculate_ab_stats_clean(records_tuple, target_date=None):
         past_sub = records_tuple[:i]
         res_a = analyze_A_engine_tuple(past_sub, include_history=False)
         res_b = analyze_B_engine_tuple(past_sub, include_history=False)
-        res_comb = calculate_combined_avoid_pick(past_sub, res_a, res_b)
+        res_comb = calculate_combined_avoid_pick(past_sub, res_a, res_b, check_prev_fail=True)
 
         if res_a:
             tot_a += 1
@@ -448,11 +444,12 @@ else:
 
     st.markdown("---")
 
+    # 📌 직전회차 검증을 정확한 시점 데이터로 고정 표출
     if len(records_tuple) >= 4:
         prev_sub = records_tuple[:-1]
         prev_a_res = analyze_A_engine_tuple(prev_sub, include_history=False)
         prev_b_res = analyze_B_engine_tuple(prev_sub, include_history=False)
-        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a_res, prev_b_res)
+        prev_comb = calculate_combined_avoid_pick(prev_sub, prev_a_res, prev_b_res, check_prev_fail=True)
         prev_actual = last_rec['result']
         st.markdown(f"**직전회차 결과 ( {last_rec['round']}회차 )**")
         if prev_actual == "PASS":
@@ -468,7 +465,7 @@ else:
 
     curr_a_res = analyze_A_engine_tuple(records_tuple, include_history=True)
     curr_b_res = analyze_B_engine_tuple(records_tuple, include_history=True)
-    combined_pick = calculate_combined_avoid_pick(records_tuple, curr_a_res, curr_b_res)
+    combined_pick = calculate_combined_avoid_pick(records_tuple, curr_a_res, curr_b_res, check_prev_fail=True)
 
     st.markdown(f"**이번회차 지울픽 분석 ( {next_round}회차 )**")
     
@@ -555,7 +552,7 @@ else:
             if i < 3: continue
             p_sub = records_tuple[:i]
             res_a_prev, res_b_prev = analyze_A_engine_tuple(p_sub, include_history=False), analyze_B_engine_tuple(p_sub, include_history=False)
-            res_comb_prev = calculate_combined_avoid_pick(p_sub, res_a_prev, res_b_prev)
+            res_comb_prev = calculate_combined_avoid_pick(p_sub, res_a_prev, res_b_prev, check_prev_fail=True)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
