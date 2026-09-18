@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 동적 꺾기 전용 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 빈출패턴(박스/퐁당) 분석기", page_icon="📦", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -61,14 +61,6 @@ st.markdown("""
 
 MAX_DATA_SIZE = 2000
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
-
-# 요소별 매핑 테이블
-ITEM_MAP = {
-    '우사': ('우', '사', '짝'),
-    '우삼': ('우', '삼', '홀'),
-    '좌사': ('좌', '사', '홀'),
-    '좌삼': ('좌', '삼', '짝')
-}
 
 ITEM_FULL_MAP = {
     '우사': '우사짝',
@@ -135,67 +127,55 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 단일 요소 스트림(좌/우, 삼/사, 홀/짝) 패턴 꺾기 분석
-def get_break_element(stream, val1, val2):
-    n = len(stream)
-    if n < 2: return val1
-    
-    # 1) 3연속 이상 줄 끊기 (예: 홀홀홀 -> 짝)
-    if n >= 3 and stream[-1] == stream[-2] and stream[-2] == stream[-3]:
-        return val2 if stream[-1] == val1 else val1
-
-    # 2) 2-2 박스 형태 꺾기 (예: 우우좌좌우우 -> 우 / A A B B A A -> A)
-    if n >= 6 and stream[-1] == stream[-2] and stream[-3] == stream[-4] and stream[-5] == stream[-6] and stream[-1] != stream[-3] and stream[-3] == stream[-5]:
-        return stream[-1]  # 2타 박스 마감 후 전환 유지
-        
-    # 3) 퐁당 끊기 (예: 좌우좌우 -> 우 / A B A B -> B)
-    if n >= 4 and stream[-1] != stream[-2] and stream[-2] != stream[-3] and stream[-3] != stream[-4]:
-        return stream[-1]  # 퐁당이 끝난다는 전제로 직전 요소와 동일하게
-
-    # 기본: 직전 요소의 반대로 우선 배치
-    return val2 if stream[-1] == val1 else val1
-
-# 🎯 3개 요소(출발, 줄, 홀짝) 독립 연산 후 조합 추출
-def analyze_3way_break_pattern(records_tuple, prev_rec_failed=False, prev_rec_pick=None):
-    valid = [r for r in records_tuple if r[2] in ALL_COMBOS]
+# 📦 [최다 빈출 패턴 집중 분석 연산 (박스/퐁당 중심)]
+def analyze_top_frequent_pattern(records_tuple):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
-        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족', 'info': '기본'}
+        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족', 'patt_type': '기본'}
 
-    # 📌 추천 실패 시: 꺾기가 성공할 때까지 이전 추천 픽 고정 유지
-    if prev_rec_failed and prev_rec_pick in ALL_COMBOS:
-        rec_combo = prev_rec_pick
-        avoid_combo = OPPOSITE_MAP.get(rec_combo, '좌사')
-        info_str = "⚡ 실패 연속 - 꺾기 추천 유지"
+    n = len(valid)
+    last = valid[-1]      # N-1
+    prev = valid[-2]      # N-2
+    prev2 = valid[-3] if n >= 3 else None   # N-3
+    prev3 = valid[-4] if n >= 4 else None   # N-4
+
+    # 1) 2-2 박스완성 구간 (A A B B -> A 전환 타이밍)
+    if n >= 4 and prev == last and prev2 != prev and prev3 == prev2:
+        rec_pick = prev2
+        avoid_pick = last
+        patt_type = "📦 2-2 박스 완성 (전환 타이밍)"
+
+    # 2) 2-2 박스 진행중 (A A B -> B 2타 채우기)
+    elif n >= 3 and prev == last and prev2 != prev:
+        rec_pick = last
+        avoid_pick = OPPOSITE_MAP.get(last, '좌삼')
+        patt_type = "📦 2-2 박스 진행 (2타 인정)"
+
+    # 3) 1-1 퐁당 교대 구간 (A B A B -> A 타겟)
+    elif n >= 4 and prev != last and prev2 != prev and prev3 == prev2:
+        rec_pick = prev
+        avoid_pick = last
+        patt_type = "🌊 1:1 퐁당 교대 흐름"
+
+    # 4) 3연속 이상 줄 구간 (A A A -> A 꺾기 방어 또는 유지)
+    elif n >= 3 and prev == last and prev2 == prev:
+        rec_pick = OPPOSITE_MAP.get(last, '좌삼')
+        avoid_pick = last
+        patt_type = "⚡ 3연속 줄 꺾기 타이밍"
+
+    # 기본: 퐁당/박스 경계
     else:
-        # 추천 성공 시 또는 일반 상태: 새 3축 꺾기 분석 적용
-        s_stream = [ITEM_MAP[r[2]][0] for r in valid]
-        l_stream = [ITEM_MAP[r[2]][1] for r in valid]
-        o_stream = [ITEM_MAP[r[2]][2] for r in valid]
+        rec_pick = last
+        avoid_pick = OPPOSITE_MAP.get(last, '좌삼')
+        patt_type = "🔄 일반 박스/퐁당 혼합 흐름"
 
-        rec_s = get_break_element(s_stream, '우', '좌')
-        rec_l = get_break_element(l_stream, '사', '삼')
-        rec_o = get_break_element(o_stream, '짝', '홀')
-
-        # 3요소 조합
-        target_tuple = (rec_s, rec_l, rec_o)
-        
-        # 튜플을 ALL_COMBOS 명칭으로 변환
-        rec_combo = '우삼'
-        for combo, tup in ITEM_MAP.items():
-            if tup == target_tuple:
-                rec_combo = combo
-                break
-                
-        avoid_combo = OPPOSITE_MAP.get(rec_combo, '좌사')
-        info_str = f"🎯 패턴 꺾기 조합 [{rec_s}/{rec_l}/{rec_o}]"
-
-    pattern_display = " ➔ ".join([r[2] for r in valid[-4:]])
+    pattern_display = " ➔ ".join(valid[-4:])
 
     return {
-        'rec': rec_combo,
-        'avoid': avoid_combo,
+        'rec': rec_pick,
+        'avoid': avoid_pick,
         'pattern_str': pattern_display,
-        'info': info_str
+        'patt_type': patt_type
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
@@ -207,8 +187,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     avoid_win_streak, max_avoid_win_streak = 0, 0
     avoid_lose_streak, max_avoid_lose_streak = 0, 0
 
-    prev_failed = False
-    last_rec_pick = None
     history_picks = {}
 
     for i in range(3, n):
@@ -219,7 +197,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_3way_break_pattern(past_sub, prev_rec_failed=prev_failed, prev_rec_pick=last_rec_pick)
+            res = analyze_top_frequent_pattern(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -237,18 +215,12 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 avoid_win_streak = 0
                 if avoid_lose_streak > max_avoid_lose_streak: max_avoid_lose_streak = avoid_lose_streak
 
-        # 다음 회차용 실패 여부 및 직전 픽 업데이트
-        prev_failed = (res['rec'] != act)
-        last_rec_pick = res['rec']
-
     stats = {
         'tot': tot,
         'rec_win': rec_win, 'rec_lose': tot - rec_win, 'rec_rate': (rec_win/tot*100.0) if tot > 0 else 0.0,
         'avoid_win': avoid_win, 'avoid_lose': tot - avoid_win, 'avoid_rate': (avoid_win/tot*100.0) if tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
-        'max_avoid_lose_streak': max_avoid_lose_streak,
-        'last_failed': prev_failed,
-        'last_pick': last_rec_pick
+        'max_avoid_lose_streak': max_avoid_lose_streak
     }
     return stats, history_picks
 
@@ -327,7 +299,7 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 동적 꺾기 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 빈출패턴 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -337,7 +309,7 @@ else:
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 동적 꺾기 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 빈출패턴 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -362,18 +334,15 @@ else:
 
     st.markdown("---")
 
-    p_failed = recent_stat['last_failed'] if recent_stat else False
-    p_pick = recent_stat['last_pick'] if recent_stat else None
-    
-    curr_res = analyze_3way_break_pattern(records_tuple, prev_rec_failed=p_failed, prev_rec_pick=p_pick)
+    curr_res = analyze_top_frequent_pattern(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 동적 꺾기 분석 ( {next_round}회차 )**")
+    st.markdown(f"**이번회차 빈출패턴 전용 분석 ( {next_round}회차 )**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🏷️ **분석 알고리즘 상태**: `{curr_res['info']}`")
+    st.markdown(f"🔍 **감지된 패턴**: `{curr_res['patt_type']}`")
     st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
     st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
 
@@ -443,7 +412,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (동적 꺾기 대조 리스트)**")
+    st.markdown("**오늘 세부 결과 (빈출패턴 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
