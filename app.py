@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 순수 A/B 알고리즘 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 배팅 가이드 A/B 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -25,7 +25,6 @@ st.markdown("""
 <style>
     html, body { overscroll-behavior-y: contain !important; }
     .stApp { overscroll-behavior-y: none !important; }
-    /* 🛠️ 상단 패딩을 0.8rem으로 늘려 짤림 현상 방지 */
     .block-container { padding: 0.8rem 0.3rem 80px 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
@@ -170,14 +169,15 @@ def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
 
     return pick, weight, mode
 
-def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}):
+def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
             'rec': '우삼', 'avoid': '좌사',
             'start_pick': '우', 'line_pick': '삼', 'oe_pick': '홀',
             'start_mode': '기본', 'line_mode': '기본', 'oe_mode': '기본',
-            'top2_info': '데이터 수집 중', 'pattern_str': '-'
+            'top2_info': '데이터 수집 중', 'pattern_str': '-',
+            'bet_guide': '⛔ 패스 추천 (데이터 부족)', 'bet_class': 'pass'
         }
 
     start_stream = [ITEM_MAP[r][0] for r in valid]
@@ -220,7 +220,17 @@ def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     pattern_display = " ➔ ".join(valid[-4:])
 
-    top2_info = f"1위 {top1[4]}({top1[1]}, {top1[3]}) + 2위 {top2[4]}({top2[1]}, {top2[3]}) 조합 [3위 {top3[4]} 제외]"
+    # 🎯 배팅 추천 / 패스 가이드 연산
+    if last_avoid_failed:
+        bet_guide = "⛔ 패스 권장 (직전 지울픽 실패 - 변칙 구간 방어)"
+    elif top1[2] >= 85 and top2[2] >= 85:
+        bet_guide = "🔥 강한 배팅 추천 (GO! - 정석 패턴 포착)"
+    elif top1[2] >= 78 and top2[2] >= 78:
+        bet_guide = "🟡 일반 배팅 (NORMAL - 기본 고정 배팅)"
+    else:
+        bet_guide = "⛔ 패스 권장 (PASS - 패턴 불명확)"
+
+    top2_info = f"1위 {top1[4]}({top1[1]}, {top1[3]}) + 2위 {top2[4]}({top2[1]}, {top2[3]}) 조합"
 
     return {
         'rec': rec_combo,
@@ -229,7 +239,8 @@ def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line
         'line_pick': l_pick, 'line_mode': l_mode,
         'oe_pick': o_pick, 'oe_mode': o_mode,
         'top2_info': top2_info,
-        'pattern_str': pattern_display
+        'pattern_str': pattern_display,
+        'bet_guide': bet_guide
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
@@ -242,6 +253,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     avoid_lose_streak, max_avoid_lose_streak = 0, 0
 
     prev_failures = {'start': False, 'line': False, 'oe': False}
+    last_avoid_failed = False
     history_picks = {}
 
     for i in range(3, n):
@@ -252,7 +264,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_pure_ab_combined(past_sub, prev_failures)
+            res = analyze_pure_ab_combined(past_sub, prev_failures, last_avoid_failed)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -275,6 +287,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         prev_failures['start'] = (res['start_pick'] != act_s)
         prev_failures['line'] = (res['line_pick'] != act_l)
         prev_failures['oe'] = (res['oe_pick'] != act_o)
+        last_avoid_failed = (res['avoid'] == act)
 
     stats = {
         'tot': tot,
@@ -282,7 +295,8 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         'avoid_win': avoid_win, 'avoid_lose': tot - avoid_win, 'avoid_rate': (avoid_win/tot*100.0) if tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
         'max_avoid_lose_streak': max_avoid_lose_streak,
-        'prev_failures': prev_failures
+        'prev_failures': prev_failures,
+        'last_avoid_failed': last_avoid_failed
     }
     return stats, history_picks
 
@@ -411,13 +425,15 @@ else:
     st.markdown("---")
 
     p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
-    curr_res = analyze_pure_ab_combined(records_tuple, p_fails)
+    l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
+    curr_res = analyze_pure_ab_combined(records_tuple, p_fails, l_avoid_fail)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 순수 A/B 알고리즘 분석 ( {next_round}회차 )**")
+    st.markdown(f"**이번회차 배팅가이드 분석 ( {next_round}회차 )**")
+    st.markdown(f"📢 **[배팅 가이드]: `{curr_res['bet_guide']}`**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
     st.markdown(f"🔍 **3축 엔진 연산**: 출발 `{curr_res['start_pick']}` ({curr_res['start_mode']}) | 줄수 `{curr_res['line_pick']}` ({curr_res['line_mode']}) | 홀짝 `{curr_res['oe_pick']}` ({curr_res['oe_mode']})")
     st.markdown(f"💡 **조합 상태**: `{curr_res['top2_info']}`")
@@ -491,7 +507,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (순수 A/B 알고리즘 리스트)**")
+    st.markdown("**오늘 세부 결과 (배팅가이드 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
