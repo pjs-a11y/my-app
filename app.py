@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 더블필터링 교차 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 독립3축 A/B 조합 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -76,7 +76,7 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '짝')
 }
 
-OPPOSITE_ATTR_MAP = {
+OPPOSITE_SINGLE_MAP = {
     '우': '좌', '좌': '우',
     '삼': '사', '사': '삼',
     '홀': '짝', '짝': '홀'
@@ -141,86 +141,119 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [통합 4조합 순수 패턴 연산 + 더블필터 속성 추출]
-def analyze_pure_combo_pattern(records_tuple):
+# 🎯 [단일 축별 A/B 엔진 연산 함수]
+def analyze_single_axis(stream, val1, val2, prev_failed=False):
+    n = len(stream)
+    if n < 3:
+        return val1, 50.0, '기본'
+
+    last = stream[-1]
+    prev = stream[-2]
+    prev2 = stream[-3]
+
+    # B엔진 (2-2 박스 방어 모드: 이전 회차 패배 시)
+    if prev_failed:
+        # 우우좌 -> 좌 (2타 채우기)
+        if prev2 == prev and last != prev:
+            pick = last
+            prob = 75.0
+            mode = 'B엔진(2-2박스 인정)'
+        # 우우좌좌 -> 우 (2-2 완성 후 꺾기)
+        elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev:
+            pick = OPPOSITE_SINGLE_MAP[last]
+            prob = 72.0
+            mode = 'B엔진(2-2박스 전환)'
+        else:
+            pick = last
+            prob = 60.0
+            mode = 'B엔진(보수적)'
+    # A엔진 (기본 모드: 직전 따라가기/꺾기)
+    else:
+        # 우좌우 -> 좌 (퐁당 유지)
+        if prev2 != prev and prev != last:
+            pick = prev
+            prob = 70.0
+            mode = 'A엔진(퐁당)'
+        # 우우 -> 우 (줄 유지)
+        elif prev == last:
+            pick = last
+            prob = 68.0
+            mode = 'A엔진(줄유지)'
+        # 우좌좌 -> 좌 (2타 인정)
+        else:
+            pick = last
+            prob = 62.0
+            mode = 'A엔진(2타인정)'
+
+    return pick, prob, mode
+
+# 🎯 [독립 3축 연산 및 상위 2개 조합 결합]
+def analyze_3axis_combined_engine(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
-            'rec': '우삼', 'rec_prob': 25.0, 
-            'avoid': '좌사', 'avoid_prob': 25.0, 
-            'single_rec': '짝', 'single_rec_prob': 50.0,
-            'single_avoid': '좌', 'single_avoid_opp': '우', 'single_avoid_prob': 50.0,
-            'pattern_str': '-'
+            'rec': '우삼', 'avoid': '좌사',
+            'start_pick': '우', 'start_prob': 50.0,
+            'line_pick': '삼', 'line_prob': 50.0,
+            'oe_pick': '홀', 'oe_prob': 50.0,
+            'top2_info': '데이터 부족'
         }
 
-    recent_arr = valid[-500:]
-    
-    patt_len = 3
-    target_patt = recent_arr[-patt_len:]
-    counts = {c: 0 for c in ALL_COMBOS}
-    total_matches = 0
+    start_stream = [ITEM_MAP[r][0] for r in valid]
+    line_stream = [ITEM_MAP[r][1] for r in valid]
+    oe_stream = [ITEM_MAP[r][2] for r in valid]
 
-    for i in range(len(recent_arr) - patt_len):
-        if recent_arr[i:i+patt_len] == target_patt:
-            next_val = recent_arr[i+patt_len]
-            if next_val in counts:
-                counts[next_val] += 1
-                total_matches += 1
+    s_pick, s_prob, s_mode = analyze_single_axis(start_stream, '우', '좌', prev_failures['start'])
+    l_pick, l_prob, l_mode = analyze_single_axis(line_stream, '삼', '사', prev_failures['line'])
+    o_pick, o_prob, o_mode = analyze_single_axis(oe_stream, '홀', '짝', prev_failures['oe'])
 
-    if total_matches == 0:
-        patt_len = 2
-        target_patt = recent_arr[-patt_len:]
-        for i in range(len(recent_arr) - patt_len):
-            if recent_arr[i:i+patt_len] == target_patt:
-                next_val = recent_arr[i+patt_len]
-                if next_val in counts:
-                    counts[next_val] += 1
-                    total_matches += 1
+    # 3개 축 확률 정렬
+    axes = [
+        ('start', s_pick, s_prob, s_mode, '출발'),
+        ('line', l_pick, l_prob, l_mode, '줄수'),
+        ('oe', o_pick, o_prob, o_mode, '홀짝')
+    ]
+    sorted_axes = sorted(axes, key=lambda x: x[2], reverse=True)
 
-    if total_matches > 0:
-        probs = {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
+    top1 = sorted_axes[0]
+    top2 = sorted_axes[1]
+    top3 = sorted_axes[2]
+
+    # 상위 1, 2위 축 선택 및 조합 완성
+    top_keys = {top1[0], top2[0]}
+
+    # 출발 + 줄수 선택 시
+    if 'start' in top_keys and 'line' in top_keys:
+        combo_base = f"{s_pick}{l_pick}"
+        rec_combo = [c for c in ALL_COMBOS if c.startswith(combo_base)][0]
+    # 출발 + 홀짝 선택 시
+    elif 'start' in top_keys and 'oe' in top_keys:
+        if (s_pick == '우' and o_pick == '짝') or (s_pick == '좌' and o_pick == '홀'):
+            l_derived = '사'
+        else:
+            l_derived = '삼'
+        rec_combo = f"{s_pick}{l_derived}"
+    # 줄수 + 홀짝 선택 시
     else:
-        probs = {c: 25.0 for c in ALL_COMBOS}
+        if (l_pick == '사' and o_pick == '짝') or (l_pick == '삼' and o_pick == '홀'):
+            s_derived = '우'
+        else:
+            s_derived = '좌'
+        rec_combo = f"{s_derived}{l_pick}"
 
-    sorted_p = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-    pattern_display = " ➔ ".join(valid[-4:])
+    # 가장 안 나올 조합(지울픽) = 상위 2개 축의 반대 속성 조합
+    avoid_combo = ITEM_FULL_MAP[rec_combo][:2]
+    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
 
-    top_rec = sorted_p[0][0]
-    worst_avoid = sorted_p[-1][0]
-
-    rec_s, rec_l, rec_o = ITEM_MAP[top_rec]
-    rec_attrs = {rec_s, rec_l}
-
-    single_probs = {
-        '우': probs['우삼'] + probs['우사'],
-        '좌': probs['좌삼'] + probs['좌사'],
-        '삼': probs['우삼'] + probs['좌삼'],
-        '사': probs['우사'] + probs['좌사'],
-        '홀': probs['우삼'] + probs['좌사'],
-        '짝': probs['우사'] + probs['좌삼']
-    }
-
-    non_overlap_rec = {k: v for k, v in single_probs.items() if k not in rec_attrs}
-    sorted_singles_rec = sorted(non_overlap_rec.items(), key=lambda x: x[1], reverse=True)
-    best_single_rec = sorted_singles_rec[0][0]
-    best_single_rec_prob = sorted_singles_rec[0][1]
-
-    sorted_singles_all = sorted(single_probs.items(), key=lambda x: x[1])
-    worst_single_avoid = sorted_singles_all[0][0]
-    worst_single_avoid_prob = sorted_singles_all[0][1]
-    worst_single_avoid_opp = OPPOSITE_ATTR_MAP.get(worst_single_avoid, worst_single_avoid)
+    top2_info = f"{top1[4]}:{top1[1]}({top1[2]:.0f}%) + {top2[4]}:{top2[1]}({top2[2]:.0f}%) 조합 [3위 {top3[4]} 제외]"
 
     return {
-        'rec': top_rec,
-        'rec_prob': sorted_p[0][1],
-        'avoid': worst_avoid,
-        'avoid_prob': sorted_p[-1][1],
-        'single_rec': best_single_rec,
-        'single_rec_prob': best_single_rec_prob,
-        'single_avoid': worst_single_avoid,
-        'single_avoid_opp': worst_single_avoid_opp,
-        'single_avoid_prob': worst_single_avoid_prob,
-        'pattern_str': pattern_display
+        'rec': rec_combo,
+        'avoid': avoid_combo,
+        'start_pick': s_pick, 'start_prob': s_prob, 'start_mode': s_mode,
+        'line_pick': l_pick, 'line_prob': l_prob, 'line_mode': l_mode,
+        'oe_pick': o_pick, 'oe_prob': o_prob, 'oe_mode': o_mode,
+        'top2_info': top2_info
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
@@ -232,6 +265,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     avoid_win_streak, max_avoid_win_streak = 0, 0
     avoid_lose_streak, max_avoid_lose_streak = 0, 0
 
+    prev_failures = {'start': False, 'line': False, 'oe': False}
     history_picks = {}
 
     for i in range(3, n):
@@ -242,10 +276,12 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_pure_combo_pattern(past_sub)
+            res = analyze_3axis_combined_engine(past_sub, prev_failures)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
+
+        act_s, act_l, act_o = ITEM_MAP[act]
 
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
@@ -260,12 +296,18 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 avoid_win_streak = 0
                 if avoid_lose_streak > max_avoid_lose_streak: max_avoid_lose_streak = avoid_lose_streak
 
+        # 각 축별 실패 여부 갱신 (다음 회차 B엔진 스와프용)
+        prev_failures['start'] = (res['start_pick'] != act_s)
+        prev_failures['line'] = (res['line_pick'] != act_l)
+        prev_failures['oe'] = (res['oe_pick'] != act_o)
+
     stats = {
         'tot': tot,
         'rec_win': rec_win, 'rec_lose': tot - rec_win, 'rec_rate': (rec_win/tot*100.0) if tot > 0 else 0.0,
         'avoid_win': avoid_win, 'avoid_lose': tot - avoid_win, 'avoid_rate': (avoid_win/tot*100.0) if tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
-        'max_avoid_lose_streak': max_avoid_lose_streak
+        'max_avoid_lose_streak': max_avoid_lose_streak,
+        'prev_failures': prev_failures
     }
     return stats, history_picks
 
@@ -358,7 +400,7 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 4조합 패턴 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 독립3축 A/B 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -368,7 +410,7 @@ else:
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 4조합 패턴 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 독립3축 A/B 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -393,20 +435,19 @@ else:
 
     st.markdown("---")
 
-    curr_res = analyze_pure_combo_pattern(records_tuple)
+    p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
+    curr_res = analyze_3axis_combined_engine(records_tuple, p_fails)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 더블필터 분석 ( {next_round}회차 )**")
-    st.markdown(f"📊 **최근 진행 패턴 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🔥 **[종합 추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `확률 {curr_res['rec_prob']:.1f}%`")
-    st.markdown(f"⛔ **[종합 지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `최저 확률 {curr_res['avoid_prob']:.1f}%`")
-    
+    st.markdown(f"**이번회차 독립3축 A/B 분석 ( {next_round}회차 )**")
+    st.markdown(f"📊 **3개 축 개별 분석**: 출발 `{curr_res['start_pick']}`({curr_res['start_prob']:.0f}%, {curr_res['start_mode']}) | 줄수 `{curr_res['line_pick']}`({curr_res['line_prob']:.0f}%, {curr_res['line_mode']}) | 홀짝 `{curr_res['oe_pick']}`({curr_res['oe_prob']:.0f}%, {curr_res['oe_mode']})")
+    st.markdown(f"💡 **상위 2개 조합 선정**: `{curr_res['top2_info']}`")
     st.markdown(" ")
-    st.markdown(f"🎯 **[단일 추천 속성] 서브 유력: `{curr_res['single_rec']}`** `({curr_res['single_rec_prob']:.1f}%)` `[종합추천 중복제외]`")
-    st.markdown(f"🚫 **[단일 지울 속성] 배제: `{curr_res['single_avoid']}`** `({curr_res['single_avoid_prob']:.1f}%)` ➔ 🔥 **반대픽 추천: `{curr_res['single_avoid_opp']}`**")
+    st.markdown(f"🔥 **[최종 추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
+    st.markdown(f"⛔ **[최종 지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -474,7 +515,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (4조합 대조 리스트)**")
+    st.markdown("**오늘 세부 결과 (독립3축 A/B 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
