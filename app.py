@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 5~6패턴 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 더블필터링 교차 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -69,6 +69,19 @@ ITEM_FULL_MAP = {
     '좌삼': '좌삼짝'
 }
 
+ITEM_MAP = {
+    '우사': ('우', '사', '짝'),
+    '우삼': ('우', '삼', '홀'),
+    '좌사': ('좌', '사', '홀'),
+    '좌삼': ('좌', '삼', '짝')
+}
+
+OPPOSITE_ATTR_MAP = {
+    '우': '좌', '좌': '우',
+    '삼': '사', '사': '삼',
+    '홀': '짝', '짝': '홀'
+}
+
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
 def get_current_realtime_round():
@@ -128,19 +141,24 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [5~6개 패턴 순수 패턴 연산]
-def analyze_pure_combo_pattern_5to6(records_tuple):
+# 🎯 [통합 4조합 순수 패턴 연산 + 더블필터 속성 추출]
+def analyze_pure_combo_pattern(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 5:
-        return {'rec': '우삼', 'rec_prob': 25.0, 'avoid': '좌사', 'avoid_prob': 25.0, 'pattern_str': '-'}
+    if len(valid) < 3:
+        return {
+            'rec': '우삼', 'rec_prob': 25.0, 
+            'avoid': '좌사', 'avoid_prob': 25.0, 
+            'single_rec': '짝', 'single_rec_prob': 50.0,
+            'single_avoid': '좌', 'single_avoid_opp': '우', 'single_avoid_prob': 50.0,
+            'pattern_str': '-'
+        }
 
     recent_arr = valid[-500:]
+    
+    patt_len = 3
+    target_patt = recent_arr[-patt_len:]
     counts = {c: 0 for c in ALL_COMBOS}
     total_matches = 0
-    
-    # 1차: 최근 5개 연속 패턴 대조
-    patt_len = 5
-    target_patt = recent_arr[-patt_len:]
 
     for i in range(len(recent_arr) - patt_len):
         if recent_arr[i:i+patt_len] == target_patt:
@@ -149,20 +167,8 @@ def analyze_pure_combo_pattern_5to6(records_tuple):
                 counts[next_val] += 1
                 total_matches += 1
 
-    # 2차: 5개 패턴 미포착 시 4개 연속 패턴 Fallback
     if total_matches == 0:
-        patt_len = 4
-        target_patt = recent_arr[-patt_len:]
-        for i in range(len(recent_arr) - patt_len):
-            if recent_arr[i:i+patt_len] == target_patt:
-                next_val = recent_arr[i+patt_len]
-                if next_val in counts:
-                    counts[next_val] += 1
-                    total_matches += 1
-
-    # 3차: 4개 패턴도 미포착 시 3개 연속 패턴 Fallback
-    if total_matches == 0:
-        patt_len = 3
+        patt_len = 2
         target_patt = recent_arr[-patt_len:]
         for i in range(len(recent_arr) - patt_len):
             if recent_arr[i:i+patt_len] == target_patt:
@@ -177,19 +183,49 @@ def analyze_pure_combo_pattern_5to6(records_tuple):
         probs = {c: 25.0 for c in ALL_COMBOS}
 
     sorted_p = sorted(probs.items(), key=lambda x: x[1], reverse=True)
-    pattern_display = " ➔ ".join(valid[-6:])  # 최근 6개 표출
+    pattern_display = " ➔ ".join(valid[-4:])
+
+    top_rec = sorted_p[0][0]
+    worst_avoid = sorted_p[-1][0]
+
+    rec_s, rec_l, rec_o = ITEM_MAP[top_rec]
+    rec_attrs = {rec_s, rec_l}
+
+    single_probs = {
+        '우': probs['우삼'] + probs['우사'],
+        '좌': probs['좌삼'] + probs['좌사'],
+        '삼': probs['우삼'] + probs['좌삼'],
+        '사': probs['우사'] + probs['좌사'],
+        '홀': probs['우삼'] + probs['좌사'],
+        '짝': probs['우사'] + probs['좌삼']
+    }
+
+    non_overlap_rec = {k: v for k, v in single_probs.items() if k not in rec_attrs}
+    sorted_singles_rec = sorted(non_overlap_rec.items(), key=lambda x: x[1], reverse=True)
+    best_single_rec = sorted_singles_rec[0][0]
+    best_single_rec_prob = sorted_singles_rec[0][1]
+
+    sorted_singles_all = sorted(single_probs.items(), key=lambda x: x[1])
+    worst_single_avoid = sorted_singles_all[0][0]
+    worst_single_avoid_prob = sorted_singles_all[0][1]
+    worst_single_avoid_opp = OPPOSITE_ATTR_MAP.get(worst_single_avoid, worst_single_avoid)
 
     return {
-        'rec': sorted_p[0][0],
+        'rec': top_rec,
         'rec_prob': sorted_p[0][1],
-        'avoid': sorted_p[-1][0],
+        'avoid': worst_avoid,
         'avoid_prob': sorted_p[-1][1],
+        'single_rec': best_single_rec,
+        'single_rec_prob': best_single_rec_prob,
+        'single_avoid': worst_single_avoid,
+        'single_avoid_opp': worst_single_avoid_opp,
+        'single_avoid_prob': worst_single_avoid_prob,
         'pattern_str': pattern_display
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
-    if n < 6: return None, {}
+    if n < 4: return None, {}
 
     tot = 0
     rec_win, avoid_win = 0, 0
@@ -198,7 +234,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
     history_picks = {}
 
-    for i in range(5, n):
+    for i in range(3, n):
         act = records_tuple[i][2]
         rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
@@ -206,7 +242,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_pure_combo_pattern_5to6(past_sub)
+            res = analyze_pure_combo_pattern(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -322,7 +358,7 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 5~6패턴 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 4조합 패턴 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -332,7 +368,7 @@ else:
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 5~6패턴 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 4조합 패턴 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -340,7 +376,7 @@ else:
 
     st.markdown("---")
 
-    if len(records_tuple) >= 6 and history_picks:
+    if len(records_tuple) >= 4 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_res = history_picks.get(last_idx)
         prev_actual = last_rec['result']
@@ -353,20 +389,24 @@ else:
             avoid_ok = "안나옴 성공 🎯" if prev_res and prev_res['avoid'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
-                st.markdown(f"🔥 **추천픽 ({prev_res['rec']}) ➔ {rec_ok}** / ⛔ **지울픽 ({prev_res['avoid']}) ➔ {avoid_ok}**")
+                st.markdown(f"🔥 **조합 추천픽 ({prev_res['rec']}) ➔ {rec_ok}** / ⛔ **조합 지울픽 ({prev_res['avoid']}) ➔ {avoid_ok}**")
 
     st.markdown("---")
 
-    curr_res = analyze_pure_combo_pattern_5to6(records_tuple)
+    curr_res = analyze_pure_combo_pattern(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 5~6패턴 분석 ( {next_round}회차 )**")
-    st.markdown(f"📊 **최근 진행 패턴 흐름 (최근 6개)**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `패턴 확률 {curr_res['rec_prob']:.1f}%`")
-    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `최저 확률 {curr_res['avoid_prob']:.1f}%`")
+    st.markdown(f"**이번회차 더블필터 분석 ( {next_round}회차 )**")
+    st.markdown(f"📊 **최근 진행 패턴 흐름**: `{curr_res['pattern_str']}`")
+    st.markdown(f"🔥 **[종합 추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `확률 {curr_res['rec_prob']:.1f}%`")
+    st.markdown(f"⛔ **[종합 지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `최저 확률 {curr_res['avoid_prob']:.1f}%`")
+    
+    st.markdown(" ")
+    st.markdown(f"🎯 **[단일 추천 속성] 서브 유력: `{curr_res['single_rec']}`** `({curr_res['single_rec_prob']:.1f}%)` `[종합추천 중복제외]`")
+    st.markdown(f"🚫 **[단일 지울 속성] 배제: `{curr_res['single_avoid']}`** `({curr_res['single_avoid_prob']:.1f}%)` ➔ 🔥 **반대픽 추천: `{curr_res['single_avoid_opp']}`**")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -434,12 +474,12 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (5~6패턴 대조 리스트)**")
-    if len(records_tuple) >= 6 and history_picks:
+    st.markdown("**오늘 세부 결과 (4조합 대조 리스트)**")
+    if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
         for i in reversed(today_indices):
-            if i < 5: continue
+            if i < 3: continue
             res_prev = history_picks.get(i)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
