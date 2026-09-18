@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 빈출패턴(박스/퐁당) 분석기", page_icon="📦", layout="centered")
+st.set_page_config(page_title="키노사다리 직전결과 배제 전용 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -127,55 +127,34 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 📦 [최다 빈출 패턴 집중 분석 연산 (박스/퐁당 중심)]
-def analyze_top_frequent_pattern(records_tuple):
+# 🎯 [직전 결과 배제 가설 분석 연산]
+def analyze_no_repeat_pattern(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3:
-        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족', 'patt_type': '기본'}
+    if len(valid) < 2:
+        return {'rec': '우삼', 'avoid': '좌사', 'pattern_str': '데이터 부족'}
 
-    n = len(valid)
-    last = valid[-1]      # N-1
-    prev = valid[-2]      # N-2
-    prev2 = valid[-3] if n >= 3 else None   # N-3
-    prev3 = valid[-4] if n >= 4 else None   # N-4
+    last = valid[-1]       # 직전 회차 결과 (N-1)
+    prev = valid[-2]       # 전전 회차 결과 (N-2)
 
-    # 1) 2-2 박스완성 구간 (A A B B -> A 전환 타이밍)
-    if n >= 4 and prev == last and prev2 != prev and prev3 == prev2:
-        rec_pick = prev2
-        avoid_pick = last
-        patt_type = "📦 2-2 박스 완성 (전환 타이밍)"
+    # 1. 지울 픽: 직전 회차 결과는 100% 안 나온다고 가정하여 배제
+    avoid_pick = last
 
-    # 2) 2-2 박스 진행중 (A A B -> B 2타 채우기)
-    elif n >= 3 and prev == last and prev2 != prev:
-        rec_pick = last
-        avoid_pick = OPPOSITE_MAP.get(last, '좌삼')
-        patt_type = "📦 2-2 박스 진행 (2타 인정)"
+    # 2. 추천 픽: 직전 결과를 제외한 나머지 3개 조합 중, 퐁당 및 대칭성 고려하여 최고 유력 픽 산출
+    remaining_combos = [c for c in ALL_COMBOS if c != avoid_pick]
 
-    # 3) 1-1 퐁당 교대 구간 (A B A B -> A 타겟)
-    elif n >= 4 and prev != last and prev2 != prev and prev3 == prev2:
+    # 전전 회차가 직전과 달랐다면 (퐁당 흐름 유지 전전 회차 추천)
+    if prev in remaining_combos:
         rec_pick = prev
-        avoid_pick = last
-        patt_type = "🌊 1:1 퐁당 교대 흐름"
-
-    # 4) 3연속 이상 줄 구간 (A A A -> A 꺾기 방어 또는 유지)
-    elif n >= 3 and prev == last and prev2 == prev:
-        rec_pick = OPPOSITE_MAP.get(last, '좌삼')
-        avoid_pick = last
-        patt_type = "⚡ 3연속 줄 꺾기 타이밍"
-
-    # 기본: 퐁당/박스 경계
     else:
-        rec_pick = last
-        avoid_pick = OPPOSITE_MAP.get(last, '좌삼')
-        patt_type = "🔄 일반 박스/퐁당 혼합 흐름"
+        # 완전 반대 대칭 조합 선택
+        rec_pick = OPPOSITE_MAP.get(last, remaining_combos[0])
 
     pattern_display = " ➔ ".join(valid[-4:])
 
     return {
         'rec': rec_pick,
         'avoid': avoid_pick,
-        'pattern_str': pattern_display,
-        'patt_type': patt_type
+        'pattern_str': pattern_display
     }
 
 def calculate_stats(records_tuple, history_store, target_date=None):
@@ -197,7 +176,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_top_frequent_pattern(past_sub)
+            res = analyze_no_repeat_pattern(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -299,7 +278,7 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 빈출패턴 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 직전결과 배제 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -309,7 +288,7 @@ else:
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 빈출패턴 통계 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 직전결과 배제 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -334,17 +313,16 @@ else:
 
     st.markdown("---")
 
-    curr_res = analyze_top_frequent_pattern(records_tuple)
+    curr_res = analyze_no_repeat_pattern(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 빈출패턴 전용 분석 ( {next_round}회차 )**")
+    st.markdown(f"**이번회차 직전결과 배제 분석 ( {next_round}회차 )**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🔍 **감지된 패턴**: `{curr_res['patt_type']}`")
-    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
-    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
+    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `[직전 배제 3조합 대조]`")
+    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `[직전 동일 조합 무조건 지움]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -412,7 +390,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (빈출패턴 대조 리스트)**")
+    st.markdown("**오늘 세부 결과 (직전 배제 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
