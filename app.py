@@ -7,7 +7,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 A/B 미출현 스와프 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 5~6패턴 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -69,13 +69,6 @@ ITEM_FULL_MAP = {
     '좌삼': '좌삼짝'
 }
 
-OPPOSITE_MAP = {
-    '우사': '좌삼',
-    '우삼': '좌사',
-    '좌사': '우삼',
-    '좌삼': '우사'
-}
-
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
 def get_current_realtime_round():
@@ -135,73 +128,77 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 가장 오래 미출현한 조합 탐색
-def get_longest_unreleased_combo(valid_list):
-    if not valid_list:
-        return '좌사', 0
-    
-    last_indices = {}
-    total_len = len(valid_list)
-    
-    for combo in ALL_COMBOS:
-        if combo in valid_list:
-            rev_idx = valid_list[::-1].index(combo)
-            last_indices[combo] = rev_idx
-        else:
-            last_indices[combo] = total_len
-
-    sorted_unreleased = sorted(last_indices.items(), key=lambda x: x[1], reverse=True)
-    return sorted_unreleased[0][0], sorted_unreleased[0][1]
-
-# 🎯 A/B 스와프 분석
-def analyze_ab_cold_swap_pattern(records_tuple, current_mode='A'):
+# 🎯 [5~6개 패턴 순수 패턴 연산]
+def analyze_pure_combo_pattern_5to6(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3:
-        return {
-            'rec': '우삼', 'avoid': '좌사', 
-            'mode': 'A', 'cold_combo': '좌사', 'gap': 0,
-            'pattern_str': '-'
-        }
+    if len(valid) < 5:
+        return {'rec': '우삼', 'rec_prob': 25.0, 'avoid': '좌사', 'avoid_prob': 25.0, 'pattern_str': '-'}
 
-    cold_combo, gap = get_longest_unreleased_combo(valid)
-    last_item = valid[-1]
+    recent_arr = valid[-500:]
+    counts = {c: 0 for c in ALL_COMBOS}
+    total_matches = 0
+    
+    # 1차: 최근 5개 연속 패턴 대조
+    patt_len = 5
+    target_patt = recent_arr[-patt_len:]
 
-    if current_mode == 'A':
-        # [A 모드]: 오래 안 나온 조합을 지움 (안나옴 전제)
-        avoid_pick = cold_combo
-        rec_pick = OPPOSITE_MAP.get(avoid_pick, '우삼')
-        mode_info = f"상태 A (미출현 {cold_combo} 지움 유지)"
+    for i in range(len(recent_arr) - patt_len):
+        if recent_arr[i:i+patt_len] == target_patt:
+            next_val = recent_arr[i+patt_len]
+            if next_val in counts:
+                counts[next_val] += 1
+                total_matches += 1
+
+    # 2차: 5개 패턴 미포착 시 4개 연속 패턴 Fallback
+    if total_matches == 0:
+        patt_len = 4
+        target_patt = recent_arr[-patt_len:]
+        for i in range(len(recent_arr) - patt_len):
+            if recent_arr[i:i+patt_len] == target_patt:
+                next_val = recent_arr[i+patt_len]
+                if next_val in counts:
+                    counts[next_val] += 1
+                    total_matches += 1
+
+    # 3차: 4개 패턴도 미포착 시 3개 연속 패턴 Fallback
+    if total_matches == 0:
+        patt_len = 3
+        target_patt = recent_arr[-patt_len:]
+        for i in range(len(recent_arr) - patt_len):
+            if recent_arr[i:i+patt_len] == target_patt:
+                next_val = recent_arr[i+patt_len]
+                if next_val in counts:
+                    counts[next_val] += 1
+                    total_matches += 1
+
+    if total_matches > 0:
+        probs = {c: (counts[c] / total_matches) * 100.0 for c in ALL_COMBOS}
     else:
-        # [B 모드]: 오래 안 나온 조합이 터졌다고 보고 추천 (나옴 전제)
-        rec_pick = cold_combo
-        avoid_pick = last_item if last_item != rec_pick else OPPOSITE_MAP.get(rec_pick, '좌사')
-        mode_info = f"⚡ 상태 B (미출현 {cold_combo} 추천 전환)"
+        probs = {c: 25.0 for c in ALL_COMBOS}
 
-    pattern_display = " ➔ ".join(valid[-4:])
+    sorted_p = sorted(probs.items(), key=lambda x: x[1], reverse=True)
+    pattern_display = " ➔ ".join(valid[-6:])  # 최근 6개 표출
 
     return {
-        'rec': rec_pick,
-        'avoid': avoid_pick,
-        'mode': current_mode,
-        'cold_combo': cold_combo,
-        'gap': gap,
-        'info': mode_info,
+        'rec': sorted_p[0][0],
+        'rec_prob': sorted_p[0][1],
+        'avoid': sorted_p[-1][0],
+        'avoid_prob': sorted_p[-1][1],
         'pattern_str': pattern_display
     }
 
-def calculate_stats_with_ab_swap(records_tuple, history_store, target_date=None):
+def calculate_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
-    if n < 4: return None, {}
+    if n < 6: return None, {}
 
     tot = 0
     rec_win, avoid_win = 0, 0
     avoid_win_streak, max_avoid_win_streak = 0, 0
     avoid_lose_streak, max_avoid_lose_streak = 0, 0
 
-    mode = 'A'
     history_picks = {}
 
-    for i in range(3, n):
+    for i in range(5, n):
         act = records_tuple[i][2]
         rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
@@ -209,7 +206,7 @@ def calculate_stats_with_ab_swap(records_tuple, history_store, target_date=None)
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_ab_cold_swap_pattern(past_sub, current_mode=mode)
+            res = analyze_pure_combo_pattern_5to6(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -227,18 +224,12 @@ def calculate_stats_with_ab_swap(records_tuple, history_store, target_date=None)
                 avoid_win_streak = 0
                 if avoid_lose_streak > max_avoid_lose_streak: max_avoid_lose_streak = avoid_lose_streak
 
-        # 📌 지울픽 실패 시 상태 스와프 (A -> B -> A)
-        avoid_success = (res['avoid'] != act)
-        if not avoid_success:
-            mode = 'B' if mode == 'A' else 'A'
-
     stats = {
         'tot': tot,
         'rec_win': rec_win, 'rec_lose': tot - rec_win, 'rec_rate': (rec_win/tot*100.0) if tot > 0 else 0.0,
         'avoid_win': avoid_win, 'avoid_lose': tot - avoid_win, 'avoid_rate': (avoid_win/tot*100.0) if tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
-        'max_avoid_lose_streak': max_avoid_lose_streak,
-        'next_mode': mode
+        'max_avoid_lose_streak': max_avoid_lose_streak
     }
     return stats, history_picks
 
@@ -329,9 +320,9 @@ else:
 
     st.markdown("---")
 
-    recent_stat, history_picks = calculate_stats_with_ab_swap(records_tuple, st.session_state.history_store)
+    recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 A/B 스와프 통계 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 5~6패턴 통계 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
@@ -340,8 +331,8 @@ else:
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
-    today_stat, _ = calculate_stats_with_ab_swap(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 A/B 스와프 통계 ({curr_date} {w_str})**")
+    today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
+    st.markdown(f"**오늘 누적 5~6패턴 통계 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
         st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
@@ -349,7 +340,7 @@ else:
 
     st.markdown("---")
 
-    if len(records_tuple) >= 4 and history_picks:
+    if len(records_tuple) >= 6 and history_picks:
         last_idx = len(records_tuple) - 1
         prev_res = history_picks.get(last_idx)
         prev_actual = last_rec['result']
@@ -366,19 +357,16 @@ else:
 
     st.markdown("---")
 
-    curr_mode = recent_stat['next_mode'] if recent_stat else 'A'
-    curr_res = analyze_ab_cold_swap_pattern(records_tuple, current_mode=curr_mode)
+    curr_res = analyze_pure_combo_pattern_5to6(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 A/B 스와프 분석 ( {next_round}회차 )**")
-    st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"❄️ **가장 오래 안 나온 조합**: `{curr_res['cold_combo']}` ({curr_res['gap']}회차 미출현)")
-    st.markdown(f"🏷️ **현재 분석 상태**: `{curr_res['info']}`")
-    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
-    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
+    st.markdown(f"**이번회차 5~6패턴 분석 ( {next_round}회차 )**")
+    st.markdown(f"📊 **최근 진행 패턴 흐름 (최근 6개)**: `{curr_res['pattern_str']}`")
+    st.markdown(f"🔥 **[추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})** `패턴 확률 {curr_res['rec_prob']:.1f}%`")
+    st.markdown(f"⛔ **[지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `최저 확률 {curr_res['avoid_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -446,12 +434,12 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (A/B 스와프 리스트)**")
-    if len(records_tuple) >= 4 and history_picks:
+    st.markdown("**오늘 세부 결과 (5~6패턴 대조 리스트)**")
+    if len(records_tuple) >= 6 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
         for i in reversed(today_indices):
-            if i < 3: continue
+            if i < 5: continue
             res_prev = history_picks.get(i)
             act_item, rd_num = records_tuple[i][2], records_tuple[i][1]
             if act_item == "PASS": continue
@@ -462,7 +450,6 @@ else:
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "적용 모드": f"모드 {res_prev['mode']}" if res_prev else "-",
                 "추천픽 / 결과": f"{res_prev['rec'] if res_prev else '-'} / {rec_match}",
                 "지울픽 / 결과": f"{res_prev['avoid'] if res_prev else '-'} / {avoid_match}"
             })
