@@ -25,7 +25,8 @@ st.markdown("""
 <style>
     html, body { overscroll-behavior-y: contain !important; }
     .stApp { overscroll-behavior-y: none !important; }
-    .block-container { padding: 0.3rem 0.3rem 80px 0.3rem !important; }
+    /* 🛠️ 상단 패딩을 0.8rem으로 늘려 짤림 현상 방지 */
+    .block-container { padding: 0.8rem 0.3rem 80px 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
@@ -131,7 +132,6 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [순수 A/B 규칙 단일 축 연산]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3:
@@ -141,14 +141,11 @@ def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     prev = stream[-2]
     prev2 = stream[-3]
 
-    # B엔진 (직전 회차 틀렸을 때 -> 2-2 박스 방어 규칙)
     if prev_failed:
-        # 우우좌 -> 좌 (2타 채우기)
         if prev2 == prev and last != prev:
             pick = last
             weight = 90
             mode = 'B엔진(2타 채우기)'
-        # 우우좌좌 -> 우 (2-2 박스 완성 후 꺾기)
         elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev:
             pick = OPPOSITE_SINGLE_MAP[last]
             weight = 88
@@ -157,19 +154,15 @@ def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
             pick = last
             weight = 75
             mode = 'B엔진(유지)'
-    # A엔진 (기본 상태 -> 퐁당/줄/2타 추종 규칙)
     else:
-        # 우좌우 -> 좌 (퐁당 유지)
         if prev2 != prev and prev != last:
             pick = prev
             weight = 85
             mode = 'A엔진(퐁당)'
-        # 우우 -> 우 (줄 유지)
         elif prev == last:
             pick = last
             weight = 82
             mode = 'A엔진(줄유지)'
-        # 우좌좌 -> 좌 (2타 인정)
         else:
             pick = last
             weight = 78
@@ -177,7 +170,6 @@ def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
 
     return pick, weight, mode
 
-# 🎯 [순수 A/B 알고리즘 메인 연산]
 def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
