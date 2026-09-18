@@ -78,6 +78,14 @@ ITEM_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
+def get_current_realtime_round():
+    now = datetime.now()
+    total_minutes = now.hour * 60 + now.minute
+    current_round = (total_minutes // 5) + 1
+    if current_round > 288:
+        current_round = 288
+    return now.strftime("%Y-%m-%d"), current_round
+
 def load_data():
     if not supabase: return []
     try:
@@ -127,21 +135,20 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [통합 4조합 순수 패턴 연산 + 단일 속성 추출]
+# 🎯 [통합 4조합 순수 패턴 연산 + 중복 차단 단일 픽 추출]
 def analyze_pure_combo_pattern(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
             'rec': '우삼', 'rec_prob': 25.0, 
             'avoid': '좌사', 'avoid_prob': 25.0, 
-            'single_rec': '우', 'single_rec_prob': 50.0,
+            'single_rec': '짝', 'single_rec_prob': 50.0,
             'single_avoid': '좌', 'single_avoid_prob': 50.0,
             'pattern_str': '-'
         }
 
     recent_arr = valid[-500:]
     
-    # 1차: 최근 3연속 조합 패턴 대조
     patt_len = 3
     target_patt = recent_arr[-patt_len:]
     counts = {c: 0 for c in ALL_COMBOS}
@@ -154,7 +161,6 @@ def analyze_pure_combo_pattern(records_tuple):
                 counts[next_val] += 1
                 total_matches += 1
 
-    # 2차: 3연속 패턴 미포착 시 2연속 패턴으로 Fallback
     if total_matches == 0:
         patt_len = 2
         target_patt = recent_arr[-patt_len:]
@@ -173,25 +179,44 @@ def analyze_pure_combo_pattern(records_tuple):
     sorted_p = sorted(probs.items(), key=lambda x: x[1], reverse=True)
     pattern_display = " ➔ ".join(valid[-4:])
 
-    # 📌 단일 속성(출발:우/좌, 줄수:삼/사, 홀짝:홀/짝) 확률 합산
-    single_probs = {'우': 0.0, '좌': 0.0, '삼': 0.0, '사': 0.0, '홀': 0.0, '짝': 0.0}
-    for combo, prob in probs.items():
-        s, l, o = ITEM_MAP[combo]
-        single_probs[s] += prob
-        single_probs[l] += prob
-        single_probs[o] += prob
+    # 종합 추천/지울픽
+    top_rec = sorted_p[0][0]
+    worst_avoid = sorted_p[-1][0]
 
-    sorted_singles = sorted(single_probs.items(), key=lambda x: x[1], reverse=True)
+    # 종합 추천 픽에 속한 요소 식별 (예: '우사' -> '우', '사')
+    rec_s, rec_l, rec_o = ITEM_MAP[top_rec]
+    rec_attrs = {rec_s, rec_l}  # 출발, 줄수 속성 집합
+
+    # 6개 속성 확률 계산
+    single_probs = {
+        '우': probs['우삼'] + probs['우사'],
+        '좌': probs['좌삼'] + probs['좌사'],
+        '삼': probs['우삼'] + probs['좌삼'],
+        '사': probs['우사'] + probs['좌사'],
+        '홀': probs['우삼'] + probs['좌사'],
+        '짝': probs['우사'] + probs['좌삼']
+    }
+
+    # 📌 단일 추천 픽: 종합 추천 픽 속성과 겹치지 않는 속성 중 최고 확률
+    non_overlap_rec = {k: v for k, v in single_probs.items() if k not in rec_attrs}
+    sorted_singles_rec = sorted(non_overlap_rec.items(), key=lambda x: x[1], reverse=True)
+    best_single_rec = sorted_singles_rec[0][0]
+    best_single_rec_prob = sorted_singles_rec[0][1]
+
+    # 📌 단일 지울 픽: 6개 속성 중 전체 최저 확률
+    sorted_singles_all = sorted(single_probs.items(), key=lambda x: x[1])
+    worst_single_avoid = sorted_singles_all[0][0]
+    worst_single_avoid_prob = sorted_singles_all[0][1]
 
     return {
-        'rec': sorted_p[0][0],
+        'rec': top_rec,
         'rec_prob': sorted_p[0][1],
-        'avoid': sorted_p[-1][0],
+        'avoid': worst_avoid,
         'avoid_prob': sorted_p[-1][1],
-        'single_rec': sorted_singles[0][0],
-        'single_rec_prob': sorted_singles[0][1],
-        'single_avoid': sorted_singles[-1][0],
-        'single_avoid_prob': sorted_singles[-1][1],
+        'single_rec': best_single_rec,
+        'single_rec_prob': best_single_rec_prob,
+        'single_avoid': worst_single_avoid,
+        'single_avoid_prob': worst_single_avoid_prob,
         'pattern_str': pattern_display
     }
 
@@ -298,16 +323,30 @@ elif not records:
         st.rerun()
 
 else:
+    real_date_str, real_round_num = get_current_realtime_round()
     last_rec = records[-1]
-    last_dt_obj = datetime.strptime(last_rec['date'], "%Y-%m-%d")
+    
+    col_info, col_sync = st.columns([2, 1])
+    with col_info:
+        st.markdown(f"**현재 실제 시각: {real_date_str} / {real_round_num}회차 진행 중**")
+        st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
+    
+    with col_sync:
+        if st.button("⏰ 현재 회차로 점프", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': real_date_str, 'round': real_round_num - 1, 'result': "PASS"})
+            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+            sync_all_records_db(st.session_state.records)
+            st.cache_data.clear()
+            st.rerun()
+
     if last_rec['round'] >= 288:
         next_round = 1
-        curr_date = (last_dt_obj + timedelta(days=1)).strftime("%Y-%m-%d")
+        curr_date = (datetime.strptime(last_rec['date'], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
     else:
         next_round = last_rec['round'] + 1
         curr_date = last_rec['date']
 
-    st.markdown(f"**날짜 : {curr_date} / 다음회차 : {next_round}회차**")
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
         st.session_state.show_bulk = True
         st.rerun()
@@ -363,8 +402,8 @@ else:
     st.markdown(f"⛔ **[종합 지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})** `최저 확률 {curr_res['avoid_prob']:.1f}%`")
     
     st.markdown(" ")
-    st.markdown(f"🎯 **[단일 추천픽] 가장 유력한 1개 속성: `{curr_res['single_rec']}`** `출현 확률 {curr_res['single_rec_prob']:.1f}%`")
-    st.markdown(f"🚫 **[단일 지울픽] 가장 희박한 1개 속성: `{curr_res['single_avoid']}`** `출현 확률 {curr_res['single_avoid_prob']:.1f}%`")
+    st.markdown(f"🎯 **[단일 추천픽] 서브 유력 속성: `{curr_res['single_rec']}`** `확률 {curr_res['single_rec_prob']:.1f}%` `[종합 추천 중복제외]`")
+    st.markdown(f"🚫 **[단일 지울픽] 전체 최저 속성: `{curr_res['single_avoid']}`** `확률 {curr_res['single_avoid_prob']:.1f}%`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
