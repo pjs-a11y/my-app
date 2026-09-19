@@ -219,8 +219,11 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     tot = 0
     avoid1_win, avoid2_win = 0, 0
     double_match_tot, double_match_win = 0, 0
-    avoid_win_streak, max_avoid_win_streak = 0, 0
-    avoid_lose_streak, max_avoid_lose_streak = 0, 0
+    
+    e1_win_streak, max_e1_win_streak = 0, 0
+    e1_lose_streak, max_e1_lose_streak = 0, 0
+    e2_win_streak, max_e2_win_streak = 0, 0
+    e2_lose_streak, max_e2_lose_streak = 0, 0
 
     prev_failures = {'start': False, 'line': False, 'oe': False}
     last_avoid_failed = False
@@ -243,17 +246,28 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
+            
+            # 엔진 1 연승 / 연패 카운트
             if res['avoid1'] != act:
                 avoid1_win += 1
-                avoid_win_streak += 1
-                avoid_lose_streak = 0
-                if avoid_win_streak > max_avoid_win_streak: max_avoid_win_streak = avoid_win_streak
+                e1_win_streak += 1
+                e1_lose_streak = 0
+                if e1_win_streak > max_e1_win_streak: max_e1_win_streak = e1_win_streak
             else:
-                avoid_lose_streak += 1
-                avoid_win_streak = 0
-                if avoid_lose_streak > max_avoid_lose_streak: max_avoid_lose_streak = avoid_lose_streak
+                e1_lose_streak += 1
+                e1_win_streak = 0
+                if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            if res['avoid2'] != act: avoid2_win += 1
+            # 엔진 2 연승 / 연패 카운트
+            if res['avoid2'] != act:
+                avoid2_win += 1
+                e2_win_streak += 1
+                e2_lose_streak = 0
+                if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
+            else:
+                e2_lose_streak += 1
+                e2_win_streak = 0
+                if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
             if res['avoid1'] == res['avoid2']:
                 double_match_tot += 1
@@ -271,8 +285,8 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         'avoid2_win': avoid2_win, 'avoid2_lose': tot - avoid2_win, 'avoid2_rate': (avoid2_win/tot*100.0) if tot > 0 else 0.0,
         'double_tot': double_match_tot, 'double_win': double_match_win, 'double_lose': double_match_tot - double_match_win,
         'double_rate': (double_match_win/double_match_tot*100.0) if double_match_tot > 0 else 0.0,
-        'max_avoid_win_streak': max_avoid_win_streak,
-        'max_avoid_lose_streak': max_avoid_lose_streak,
+        'max_e1_win_streak': max_e1_win_streak, 'max_e1_lose_streak': max_e1_lose_streak,
+        'max_e2_win_streak': max_e2_win_streak, 'max_e2_lose_streak': max_e2_lose_streak,
         'prev_failures': prev_failures,
         'last_avoid_failed': last_avoid_failed
     }
@@ -383,7 +397,9 @@ else:
         st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
         st.markdown(f"⛔ **엔진2 지울픽 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 (성공률 {today_stat['avoid2_rate']:.1f}%)**")
         st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승 {today_stat['double_lose']}패 (성공률 {today_stat['double_rate']:.1f}%)**")
-        st.markdown(f"   🛡️ **최다 연승 성적 : 최다 {today_stat['max_avoid_win_streak']}연속 안나옴 성공**")
+        # 🛠️ 오늘 누적 연승/연패 엔진별 세분화 표시
+        st.markdown(f"🛡️ **엔진1 최다 성적 : 연속 성공 {today_stat['max_e1_win_streak']}회 / 연속 실패 {today_stat['max_e1_lose_streak']}회**")
+        st.markdown(f"🛡️ **엔진2 최다 성적 : 연속 성공 {today_stat['max_e2_win_streak']}회 / 연속 실패 {today_stat['max_e2_lose_streak']}회**")
 
     st.markdown("---")
 
@@ -399,8 +415,10 @@ else:
             avoid1_ok = "성공 🎯" if prev_res and prev_res['avoid1'] != prev_actual else "나와버림 ❌"
             avoid2_ok = "성공 🎯" if prev_res and prev_res['avoid2'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
+            # 🛠️ 줄바꿈으로 깔끔하게 세로 정렬
             if prev_res:
-                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']}) ➔ {avoid1_ok}** / ⛔ **엔진2 지울픽 ({prev_res['avoid2']}) ➔ {avoid2_ok}**")
+                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']})** ➔ {avoid1_ok}")
+                st.markdown(f"⛔ **엔진2 지울픽 ({prev_res['avoid2']})** ➔ {avoid2_ok}")
 
     st.markdown("---")
 
