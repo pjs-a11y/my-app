@@ -131,7 +131,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1 연산 로직 - 원형 정확도 복구]
+# 🎯 [엔진 1 연산 로직]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70, '기본'
@@ -167,7 +167,7 @@ def get_engine1_picks(records_tuple, prev_failures):
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     return rec_combo, avoid_combo
 
-# 🎯 [엔진 2 연산 로직]
+# 🎯 [엔진 2: 마르코프 이행 배제 연산 로직]
 def get_engine2_avoid(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 4: return '우삼'
@@ -259,7 +259,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 double_match_tot += 1
                 if res['avoid1'] != act: double_match_win += 1
 
-        # 🎯 핵심 복구: B엔진 전환 판단을 원래의 '추천픽 실패 여부'로 정확하게 계산
         rec_s, rec_l, rec_o = ITEM_MAP[res['rec1']]
         prev_failures['start'] = (rec_s != act_s)
         prev_failures['line'] = (rec_l != act_l)
@@ -268,9 +267,9 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
     stats = {
         'tot': tot,
-        'avoid1_win': avoid1_win, 'avoid1_rate': (avoid1_win/tot*100.0) if tot > 0 else 0.0,
-        'avoid2_win': avoid2_win, 'avoid2_rate': (avoid2_win/tot*100.0) if tot > 0 else 0.0,
-        'double_tot': double_match_tot, 'double_win': double_match_win,
+        'avoid1_win': avoid1_win, 'avoid1_lose': tot - avoid1_win, 'avoid1_rate': (avoid1_win/tot*100.0) if tot > 0 else 0.0,
+        'avoid2_win': avoid2_win, 'avoid2_lose': tot - avoid2_win, 'avoid2_rate': (avoid2_win/tot*100.0) if tot > 0 else 0.0,
+        'double_tot': double_match_tot, 'double_win': double_match_win, 'double_lose': double_match_tot - double_match_win,
         'double_rate': (double_match_win/double_match_tot*100.0) if double_match_tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
         'max_avoid_lose_streak': max_avoid_lose_streak,
@@ -370,9 +369,9 @@ else:
     recent_cnt = len(records)
     st.markdown(f"**누적 2중 지울픽 성적 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 (성공률 {recent_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 (성공률 {recent_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"🔥 **더블 일치 시 성공률 : {recent_stat['double_win']}승/{recent_stat['double_tot']}회 (성공률 {recent_stat['double_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 (성공률 {recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 (성공률 {recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **더블 일치 시 성공률 : {recent_stat['double_win']}승 {recent_stat['double_lose']}패 (성공률 {recent_stat['double_rate']:.1f}%)**")
 
     st.markdown("---")
 
@@ -381,8 +380,9 @@ else:
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
     st.markdown(f"**오늘 누적 2중 지울픽 성적 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승/{today_stat['double_tot']}회 (성공률 {today_stat['double_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 (성공률 {today_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승 {today_stat['double_lose']}패 (성공률 {today_stat['double_rate']:.1f}%)**")
         st.markdown(f"   🛡️ **최다 연승 성적 : 최다 {today_stat['max_avoid_win_streak']}연속 안나옴 성공**")
 
     st.markdown("---")
