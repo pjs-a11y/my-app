@@ -131,7 +131,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1 연산 로직]
+# 🎯 [엔진 1 연산 로직 - 기존 3축 A/B 가변 유지]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70, '기본'
@@ -167,33 +167,111 @@ def get_engine1_picks(records_tuple, prev_failures):
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     return rec_combo, avoid_combo
 
-# 🎯 [엔진 2: 마르코프 이행 배제 연산 로직]
-def get_engine2_avoid(records_tuple):
+# 🎯 [엔진 2 신규 연산 로직: 박스/뿔 $\rightarrow$ 실패 시 계단/데칼 방어 모델]
+def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 4: return '우삼'
+    n = len(valid)
+    if n < 4: return '우삼', '기본'
 
-    last, prev = valid[-1], valid[-2]
+    last = valid[-1]
+    
+    # -------------------------------------------------------------
+    # 2단계 방어 분석 모드: 직전 지울픽 실패 시 (계단 / 데칼 패턴 감시)
+    # -------------------------------------------------------------
+    if last_e2_failed:
+        # 1. 계단 패턴 (1-2-3-4, 4-3-2-1 흐름) 방어
+        # 최근 연속 개수를 측정
+        streaks = []
+        curr_c = 1
+        for k in range(n-1, 0, -1):
+            if valid[k] == valid[k-1]: curr_c += 1
+            else:
+                streaks.append((valid[k], curr_c))
+                curr_c = 1
+                if len(streaks) >= 3: break
+        
+        if len(streaks) >= 2:
+            s1_len = streaks[0][1] # 직전 줄 길이
+            s2_len = streaks[1][1] # 그 전 줄 길이
+            # 계단식 증가 (예: 1타 -> 2타 -> 3타 진행 중)
+            if s1_len == s2_len + 1 and curr_c < s1_len + 1:
+                avoid = valid[-1] # 계단 이탈 꺾임 방어
+                return avoid, '방어(계단추종)'
+            elif s1_len == s2_len - 1 and curr_c >= s1_len:
+                avoid = OPPOSITE_SINGLE_MAP[valid[-1][0]] + OPPOSITE_SINGLE_MAP[valid[-1][1]]
+                return avoid, '방어(계단완성)'
 
-    if last == prev:
-        avoid_pick = f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}"
-    elif len(valid) >= 3 and valid[-3] == last:
-        avoid_pick = last
-    else:
-        avoid_pick = f"{last[0]}{OPPOSITE_SINGLE_MAP[last[1]]}"
+        # 2. 데칼 패턴 (좌우 대칭 구조: A B C B A / A B B A 등) 방어
+        if n >= 5 and valid[-1] == valid[-5] and valid[-2] == valid[-4]:
+            # 데칼 완성 시점 -> 직전 대칭 결과 배제
+            avoid = valid[-3]
+            return avoid, '방어(데칼대칭)'
 
-    return avoid_pick
+        # 기본 대칭 꺾임 배제
+        return f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}", '방어(변칙꺾기)'
+
+    # -------------------------------------------------------------
+    # 1단계 기본 분석 모드: (3박스 / 31뿔 / 12뿔 / 일반 뿔 감시)
+    # -------------------------------------------------------------
+    # 최근 연속 동일 결과 개수 카운트
+    run_len = 1
+    for k in range(n-1, 0, -1):
+        if valid[k] == valid[k-1]: run_len += 1
+        else: break
+
+    # A. 3박스 패턴 (3-3-3-3): 3연속 유지 중일 때
+    if run_len == 3:
+        avoid = last # 4번째 줄 연장 배제 (3박스 유지)
+        return avoid, '기본(3박스방어)'
+
+    # B. 12 뿔 패턴 (1타-2타-1타-2타 반복): 121212
+    if n >= 6:
+        # 최근 6개 결과의 타수 패턴 체크
+        t_list = []
+        tmp_len = 1
+        for k in range(n-1, 0, -1):
+            if valid[k] == valid[k-1]: tmp_len += 1
+            else:
+                t_list.append(tmp_len)
+                tmp_len = 1
+                if len(t_list) >= 4: break
+        
+        if len(t_list) >= 3 and t_list[:3] in [[2,1,2], [1,2,1], [2,1,1]]:
+            if run_len == 2:
+                avoid = last # 3타로 넘어가는 3연속 줄 연장 배제
+                return avoid, '기본(12뿔방어)'
+
+    # C. 31 뿔 패턴 (3타-1타-3타-1타): 31313
+    if run_len == 1 and n >= 4:
+        # 직전이 1타이고 그 전이 3타였던 경우
+        prev_run = 0
+        for k in range(n-2, -1, -1):
+            if valid[k] == valid[n-2]: prev_run += 1
+            else: break
+        if prev_run == 3:
+            avoid = valid[-2] # 무리한 3타 복귀 줄 배제
+            return avoid, '기본(31뿔방어)'
+
+    # D. 일반 뿔 형태 (1타 후 꺾여서 뿔 완성 구조)
+    if run_len == 1:
+        avoid = last # 퐁당 유지에서 직전 동일 픽 배제
+        return avoid, '기본(뿔유지)'
+
+    # 기본값
+    avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}"
+    return avoid, '기본(유지)'
 
 # 🎯 [통합 메인 연산]
-def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
+def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
-            'rec1': '우삼', 'avoid1': '좌사', 'avoid2': '우삼',
+            'rec1': '우삼', 'avoid1': '좌사', 'avoid2': '우삼', 'e2_mode': '기본',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
     rec1, avoid1 = get_engine1_picks(records_tuple, prev_failures)
-    avoid2 = get_engine2_avoid(records_tuple)
+    avoid2, e2_mode = get_engine2_avoid_pattern(records_tuple, last_e2_failed)
 
     pattern_display = " ➔ ".join(valid[-4:])
 
@@ -208,6 +286,7 @@ def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'l
         'rec1': rec1,
         'avoid1': avoid1,
         'avoid2': avoid2,
+        'e2_mode': e2_mode,
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
@@ -227,6 +306,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
     prev_failures = {'start': False, 'line': False, 'oe': False}
     last_avoid_failed = False
+    last_e2_failed = False
     history_picks = {}
 
     for i in range(3, n):
@@ -237,7 +317,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed)
+            res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -278,6 +358,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         prev_failures['line'] = (rec_l != act_l)
         prev_failures['oe'] = (rec_o != act_o)
         last_avoid_failed = (res['avoid1'] == act)
+        last_e2_failed = (res['avoid2'] == act)
 
     stats = {
         'tot': tot,
@@ -288,7 +369,8 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         'max_e1_win_streak': max_e1_win_streak, 'max_e1_lose_streak': max_e1_lose_streak,
         'max_e2_win_streak': max_e2_win_streak, 'max_e2_lose_streak': max_e2_lose_streak,
         'prev_failures': prev_failures,
-        'last_avoid_failed': last_avoid_failed
+        'last_avoid_failed': last_avoid_failed,
+        'last_e2_failed': last_e2_failed
     }
     return stats, history_picks
 
@@ -422,7 +504,8 @@ else:
 
     p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
     l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
-    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail)
+    l_e2_fail = recent_stat['last_e2_failed'] if recent_stat else False
+    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
@@ -432,7 +515,7 @@ else:
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
     st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]})** `[3축 A/B 가변]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]})** `[마르코프 이행]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]})** `[{curr_res.get('e2_mode', '특수패턴')}]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
