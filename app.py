@@ -131,7 +131,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1 연산 로직 - 기존 3축 A/B 가변 유지]
+# 🎯 [엔진 1 연산 로직]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70, '기본'
@@ -167,7 +167,7 @@ def get_engine1_picks(records_tuple, prev_failures):
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     return rec_combo, avoid_combo
 
-# 🎯 [엔진 2 신규 연산 로직: 박스/뿔 $\rightarrow$ 실패 시 계단/데칼 방어 모델]
+# 🎯 [엔진 2 정밀 보정: 독자적 특수 패턴 분석]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
@@ -175,91 +175,61 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
 
     last = valid[-1]
     
-    # -------------------------------------------------------------
-    # 2단계 방어 분석 모드: 직전 지울픽 실패 시 (계단 / 데칼 패턴 감시)
-    # -------------------------------------------------------------
+    # 방어 분석 모드 (직전 실패 시 계단 / 데칼 전담)
     if last_e2_failed:
-        # 1. 계단 패턴 (1-2-3-4, 4-3-2-1 흐름) 방어
-        # 최근 연속 개수를 측정
-        streaks = []
-        curr_c = 1
-        for k in range(n-1, 0, -1):
-            if valid[k] == valid[k-1]: curr_c += 1
-            else:
-                streaks.append((valid[k], curr_c))
-                curr_c = 1
-                if len(streaks) >= 3: break
-        
-        if len(streaks) >= 2:
-            s1_len = streaks[0][1] # 직전 줄 길이
-            s2_len = streaks[1][1] # 그 전 줄 길이
-            # 계단식 증가 (예: 1타 -> 2타 -> 3타 진행 중)
-            if s1_len == s2_len + 1 and curr_c < s1_len + 1:
-                avoid = valid[-1] # 계단 이탈 꺾임 방어
-                return avoid, '방어(계단추종)'
-            elif s1_len == s2_len - 1 and curr_c >= s1_len:
-                avoid = OPPOSITE_SINGLE_MAP[valid[-1][0]] + OPPOSITE_SINGLE_MAP[valid[-1][1]]
-                return avoid, '방어(계단완성)'
-
-        # 2. 데칼 패턴 (좌우 대칭 구조: A B C B A / A B B A 등) 방어
+        # 데칼 대칭 감시
         if n >= 5 and valid[-1] == valid[-5] and valid[-2] == valid[-4]:
-            # 데칼 완성 시점 -> 직전 대칭 결과 배제
             avoid = valid[-3]
-            return avoid, '방어(데칼대칭)'
+            return avoid, '방어(데칼)'
+        # 계단식 연장 방어
+        if n >= 4 and valid[-1] != valid[-2] and valid[-2] == valid[-3] and valid[-3] == valid[-4]:
+            avoid = valid[-1]
+            return avoid, '방어(계단)'
+            
+        avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{last[1]}"
+        return avoid, '방어(변칙)'
 
-        # 기본 대칭 꺾임 배제
-        return f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}", '방어(변칙꺾기)'
-
-    # -------------------------------------------------------------
-    # 1단계 기본 분석 모드: (3박스 / 31뿔 / 12뿔 / 일반 뿔 감시)
-    # -------------------------------------------------------------
-    # 최근 연속 동일 결과 개수 카운트
+    # 기본 특수패턴 모드 (3박스 / 31뿔 / 12뿔)
     run_len = 1
     for k in range(n-1, 0, -1):
         if valid[k] == valid[k-1]: run_len += 1
         else: break
 
-    # A. 3박스 패턴 (3-3-3-3): 3연속 유지 중일 때
+    # 1. 3박스 방어 (3연속 줄 진입 시 4번째 연장 배제)
     if run_len == 3:
-        avoid = last # 4번째 줄 연장 배제 (3박스 유지)
-        return avoid, '기본(3박스방어)'
+        return last, '기본(3박스)'
 
-    # B. 12 뿔 패턴 (1타-2타-1타-2타 반복): 121212
-    if n >= 6:
-        # 최근 6개 결과의 타수 패턴 체크
-        t_list = []
-        tmp_len = 1
-        for k in range(n-1, 0, -1):
-            if valid[k] == valid[k-1]: tmp_len += 1
-            else:
-                t_list.append(tmp_len)
-                tmp_len = 1
-                if len(t_list) >= 4: break
-        
-        if len(t_list) >= 3 and t_list[:3] in [[2,1,2], [1,2,1], [2,1,1]]:
-            if run_len == 2:
-                avoid = last # 3타로 넘어가는 3연속 줄 연장 배제
-                return avoid, '기본(12뿔방어)'
-
-    # C. 31 뿔 패턴 (3타-1타-3타-1타): 31313
+    # 2. 31 뿔 패턴 방어
     if run_len == 1 and n >= 4:
-        # 직전이 1타이고 그 전이 3타였던 경우
         prev_run = 0
         for k in range(n-2, -1, -1):
             if valid[k] == valid[n-2]: prev_run += 1
             else: break
         if prev_run == 3:
-            avoid = valid[-2] # 무리한 3타 복귀 줄 배제
-            return avoid, '기본(31뿔방어)'
+            return valid[-2], '기본(31뿔)'
 
-    # D. 일반 뿔 형태 (1타 후 꺾여서 뿔 완성 구조)
-    if run_len == 1:
-        avoid = last # 퐁당 유지에서 직전 동일 픽 배제
-        return avoid, '기본(뿔유지)'
+    # 3. 12 뿔 패턴 방어
+    if run_len == 2 and n >= 5:
+        if valid[-3] != valid[-2] and valid[-4] == valid[-3]:
+            return last, '기본(12뿔)'
 
-    # 기본값
-    avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}"
-    return avoid, '기본(유지)'
+    # 독립적 예측 지울픽 (엔진 1과 상충되지 않도록 단일 축 기준 연산)
+    s_stream = [ITEM_MAP[r][0] for r in valid]
+    l_stream = [ITEM_MAP[r][1] for r in valid]
+    
+    # 최근 축 상태 기반 지울픽 생성
+    if s_stream[-1] == s_stream[-2]:
+        avoid_s = s_stream[-1]
+    else:
+        avoid_s = OPPOSITE_SINGLE_MAP[s_stream[-1]]
+
+    if l_stream[-1] == l_stream[-2]:
+        avoid_l = OPPOSITE_SINGLE_MAP[l_stream[-1]]
+    else:
+        avoid_l = l_stream[-1]
+
+    avoid = f"{avoid_s}{avoid_l}"
+    return avoid, '기본(패턴)'
 
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
