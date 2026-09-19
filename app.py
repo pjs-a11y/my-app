@@ -131,7 +131,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1 연산 로직]
+# 🎯 [엔진 1 정밀 연산 로직: 3축 독립 A/B 가변 규칙]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70, '기본'
@@ -167,7 +167,7 @@ def get_engine1_picks(records_tuple, prev_failures):
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     return rec_combo, avoid_combo
 
-# 🎯 [엔진 2 정밀 보정: 독자적 특수 패턴 분석]
+# 🎯 [엔진 2 연산 로직: 3박스/뿔/계단/데칼 방어 모델]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
@@ -175,31 +175,21 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
 
     last = valid[-1]
     
-    # 방어 분석 모드 (직전 실패 시 계단 / 데칼 전담)
     if last_e2_failed:
-        # 데칼 대칭 감시
         if n >= 5 and valid[-1] == valid[-5] and valid[-2] == valid[-4]:
-            avoid = valid[-3]
-            return avoid, '방어(데칼)'
-        # 계단식 연장 방어
+            return valid[-3], '방어(데칼)'
         if n >= 4 and valid[-1] != valid[-2] and valid[-2] == valid[-3] and valid[-3] == valid[-4]:
-            avoid = valid[-1]
-            return avoid, '방어(계단)'
-            
-        avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{last[1]}"
-        return avoid, '방어(변칙)'
+            return valid[-1], '방어(계단)'
+        return f"{OPPOSITE_SINGLE_MAP[last[0]]}{last[1]}", '방어(변칙)'
 
-    # 기본 특수패턴 모드 (3박스 / 31뿔 / 12뿔)
     run_len = 1
     for k in range(n-1, 0, -1):
         if valid[k] == valid[k-1]: run_len += 1
         else: break
 
-    # 1. 3박스 방어 (3연속 줄 진입 시 4번째 연장 배제)
     if run_len == 3:
         return last, '기본(3박스)'
 
-    # 2. 31 뿔 패턴 방어
     if run_len == 1 and n >= 4:
         prev_run = 0
         for k in range(n-2, -1, -1):
@@ -208,30 +198,19 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
         if prev_run == 3:
             return valid[-2], '기본(31뿔)'
 
-    # 3. 12 뿔 패턴 방어
     if run_len == 2 and n >= 5:
         if valid[-3] != valid[-2] and valid[-4] == valid[-3]:
             return last, '기본(12뿔)'
 
-    # 독립적 예측 지울픽 (엔진 1과 상충되지 않도록 단일 축 기준 연산)
     s_stream = [ITEM_MAP[r][0] for r in valid]
     l_stream = [ITEM_MAP[r][1] for r in valid]
     
-    # 최근 축 상태 기반 지울픽 생성
-    if s_stream[-1] == s_stream[-2]:
-        avoid_s = s_stream[-1]
-    else:
-        avoid_s = OPPOSITE_SINGLE_MAP[s_stream[-1]]
+    avoid_s = s_stream[-1] if s_stream[-1] == s_stream[-2] else OPPOSITE_SINGLE_MAP[s_stream[-1]]
+    avoid_l = OPPOSITE_SINGLE_MAP[l_stream[-1]] if l_stream[-1] == l_stream[-2] else l_stream[-1]
 
-    if l_stream[-1] == l_stream[-2]:
-        avoid_l = OPPOSITE_SINGLE_MAP[l_stream[-1]]
-    else:
-        avoid_l = l_stream[-1]
+    return f"{avoid_s}{avoid_l}", '기본(패턴)'
 
-    avoid = f"{avoid_s}{avoid_l}"
-    return avoid, '기본(패턴)'
-
-# 🎯 [통합 메인 연산]
+# 🎯 [통합 메인 연산: 엔진 1 스와프 독립 계산 적용]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
@@ -274,6 +253,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     e2_win_streak, max_e2_win_streak = 0, 0
     e2_lose_streak, max_e2_lose_streak = 0, 0
 
+    # 🎯 엔진 1 독자 스와프 플래그
     prev_failures = {'start': False, 'line': False, 'oe': False}
     last_avoid_failed = False
     last_e2_failed = False
@@ -297,7 +277,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
             
-            # 엔진 1 연승 / 연패 카운트
+            # 엔진 1 지울픽 승패
             if res['avoid1'] != act:
                 avoid1_win += 1
                 e1_win_streak += 1
@@ -308,7 +288,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 연승 / 연패 카운트
+            # 엔진 2 지울픽 승패
             if res['avoid2'] != act:
                 avoid2_win += 1
                 e2_win_streak += 1
@@ -319,14 +299,17 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e2_win_streak = 0
                 if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
+            # 더블 일치 성적
             if res['avoid1'] == res['avoid2']:
                 double_match_tot += 1
                 if res['avoid1'] != act: double_match_win += 1
 
+        # 🎯 엔진 1 전용 B엔진 스와프 업데이트 (추천픽과 실제 결과 비교)
         rec_s, rec_l, rec_o = ITEM_MAP[res['rec1']]
         prev_failures['start'] = (rec_s != act_s)
         prev_failures['line'] = (rec_l != act_l)
         prev_failures['oe'] = (rec_o != act_o)
+        
         last_avoid_failed = (res['avoid1'] == act)
         last_e2_failed = (res['avoid2'] == act)
 
