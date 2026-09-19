@@ -138,18 +138,13 @@ def analyze_engine1_trend_axis(stream, val1, val2):
 
     last, prev, prev2 = stream[-1], stream[-2], stream[-3]
 
-    # 우좌우 -> 좌 (퐁당 유지)
-    if prev2 != prev and prev != last:
-        return prev, 85
-    # 우우 -> 우 (줄 유지)
-    elif prev == last:
-        return last, 82
-    else:
-        return last, 75
+    if prev2 != prev and prev != last: return prev, 85
+    elif prev == last: return last, 82
+    else: return last, 75
 
 def get_engine1_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '좌사'
+    if len(valid) < 3: return '우삼', '좌사', '좌'
 
     s_pick, s_w = analyze_engine1_trend_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_pick, l_w = analyze_engine1_trend_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
@@ -163,7 +158,11 @@ def get_engine1_picks(records_tuple):
     else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
 
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    return rec_combo, avoid_combo
+    # 확신도가 가장 높은 축의 반대 단일 속성을 지율 구멍 1개로 지정
+    top_axis_pick = axes[0][1]
+    single_avoid = OPPOSITE_SINGLE_MAP[top_axis_pick]
+
+    return rec_combo, avoid_combo, single_avoid
 
 # 🎯 [엔진 2 연산: 변곡점/박스 방어 로직 (2타/2-2박스)]
 def analyze_engine2_box_axis(stream, val1, val2):
@@ -172,21 +171,14 @@ def analyze_engine2_box_axis(stream, val1, val2):
 
     last, prev, prev2 = stream[-1], stream[-2], stream[-3]
 
-    # 우우좌 -> 좌 (2타 채우기)
-    if prev2 == prev and last != prev:
-        return last, 90
-    # 우우좌좌 -> 우 (2-2 박스 완성 후 꺾기)
-    elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev:
-        return OPPOSITE_SINGLE_MAP[last], 88
-    # 우좌좌 -> 좌 (2타 인정)
-    elif prev2 != prev and prev == last:
-        return last, 80
-    else:
-        return last, 72
+    if prev2 == prev and last != prev: return last, 90
+    elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev: return OPPOSITE_SINGLE_MAP[last], 88
+    elif prev2 != prev and prev == last: return last, 80
+    else: return last, 72
 
 def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '좌사'
+    if len(valid) < 3: return '우삼', '좌사', '삼'
 
     s_pick, s_w = analyze_engine2_box_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_pick, l_w = analyze_engine2_box_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
@@ -200,19 +192,23 @@ def get_engine2_picks(records_tuple):
     else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
 
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    return rec_combo, avoid_combo
+    top_axis_pick = axes[0][1]
+    single_avoid = OPPOSITE_SINGLE_MAP[top_axis_pick]
+
+    return rec_combo, avoid_combo, single_avoid
 
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, last_avoid_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
-            'rec1': '우삼', 'avoid1': '좌사', 'avoid2': '우삼',
+            'rec1': '우삼', 'avoid1': '좌사', 'single1': '좌',
+            'avoid2': '우삼', 'single2': '삼',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
-    rec1, avoid1 = get_engine1_picks(records_tuple)
-    rec2, avoid2 = get_engine2_picks(records_tuple)
+    rec1, avoid1, single1 = get_engine1_picks(records_tuple)
+    rec2, avoid2, single2 = get_engine2_picks(records_tuple)
 
     pattern_display = " ➔ ".join(valid[-4:])
 
@@ -226,7 +222,9 @@ def analyze_double_avoid_system(records_tuple, last_avoid_failed=False):
     return {
         'rec1': rec1,
         'avoid1': avoid1,
+        'single1': single1,
         'avoid2': avoid2,
+        'single2': single2,
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
@@ -263,7 +261,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
             
-            # 엔진 1 (추세 엔진) 카운트
             if res['avoid1'] != act:
                 avoid1_win += 1
                 e1_win_streak += 1
@@ -274,7 +271,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 (박스방어 엔진) 카운트
             if res['avoid2'] != act:
                 avoid2_win += 1
                 e2_win_streak += 1
@@ -285,7 +281,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e2_win_streak = 0
                 if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
-            # 더블 일치 세션 성적
             if res['avoid1'] == res['avoid2']:
                 double_match_tot += 1
                 if res['avoid1'] != act: double_match_win += 1
@@ -427,8 +422,8 @@ else:
             avoid2_ok = "성공 🎯" if prev_res and prev_res['avoid2'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
-                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']})** ➔ {avoid1_ok}")
-                st.markdown(f"⛔ **엔진2 지울픽 ({prev_res['avoid2']})** ➔ {avoid2_ok}")
+                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']}) [{prev_res.get('single1','-')}]** ➔ {avoid1_ok}")
+                st.markdown(f"⛔ **엔진2 지울픽 ({prev_res['avoid2']}) [{prev_res.get('single2','-')}]** ➔ {avoid2_ok}")
 
     st.markdown("---")
 
@@ -442,8 +437,9 @@ else:
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]})** `[추세 추종 (퐁당/줄)]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]})** `[변곡점 방어 (2타/2-2)]`")
+    # 🛠️ 단일 속성 지울픽 표시 (예: 우사짝 [짝])
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]}) ▶ 단일 지움: `{curr_res['single1']}`** `[추세 엔진]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]}) ▶ 단일 지움: `{curr_res['single2']}`** `[박스 방어 Engine]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -527,8 +523,8 @@ else:
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} / {avoid1_match}",
-                "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} / {avoid2_match}"
+                "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} [{res_prev.get('single1','-') if res_prev else '-'}] / {avoid1_match}",
+                "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} [{res_prev.get('single2','-') if res_prev else '-'}] / {avoid2_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
