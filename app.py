@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime, timedelta
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 배팅 가이드 A/B 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 2중 지울픽 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -131,114 +131,83 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
+# 🎯 [엔진 1 연산 로직 - 원형 정확도 복구]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
-    if n < 3:
-        return val1, 70, '기본'
+    if n < 3: return val1, 70, '기본'
 
-    last = stream[-1]
-    prev = stream[-2]
-    prev2 = stream[-3]
+    last, prev, prev2 = stream[-1], stream[-2], stream[-3]
 
     if prev_failed:
-        if prev2 == prev and last != prev:
-            pick = last
-            weight = 90
-            mode = 'B엔진(2타 채우기)'
-        elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev:
-            pick = OPPOSITE_SINGLE_MAP[last]
-            weight = 88
-            mode = 'B엔진(2-2박스 꺾기)'
-        else:
-            pick = last
-            weight = 75
-            mode = 'B엔진(유지)'
+        if prev2 == prev and last != prev: pick, weight, mode = last, 90, 'B엔진(2타채우기)'
+        elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev: pick, weight, mode = OPPOSITE_SINGLE_MAP[last], 88, 'B엔진(2-2꺾기)'
+        else: pick, weight, mode = last, 75, 'B엔진(유지)'
     else:
-        if prev2 != prev and prev != last:
-            pick = prev
-            weight = 85
-            mode = 'A엔진(퐁당)'
-        elif prev == last:
-            pick = last
-            weight = 82
-            mode = 'A엔진(줄유지)'
-        else:
-            pick = last
-            weight = 78
-            mode = 'A엔진(2타인정)'
+        if prev2 != prev and prev != last: pick, weight, mode = prev, 85, 'A엔진(퐁당)'
+        elif prev == last: pick, weight, mode = last, 82, 'A엔진(줄유지)'
+        else: pick, weight, mode = last, 78, 'A엔진(2타인정)'
 
     return pick, weight, mode
 
-def analyze_pure_ab_combined(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
+def get_engine1_picks(records_tuple, prev_failures):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if len(valid) < 3: return '우삼', '좌사'
+
+    s_pick, s_w, _ = analyze_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌', prev_failures['start'])
+    l_pick, l_w, _ = analyze_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사', prev_failures['line'])
+    o_pick, o_w, _ = analyze_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝', prev_failures['oe'])
+
+    axes = sorted([('start', s_pick, s_w), ('line', l_pick, l_w), ('oe', o_pick, o_w)], key=lambda x: x[2], reverse=True)
+    top_keys = {axes[0][0], axes[1][0]}
+
+    if 'start' in top_keys and 'line' in top_keys: rec_combo = [c for c in ALL_COMBOS if c.startswith(f"{s_pick}{l_pick}")][0]
+    elif 'start' in top_keys and 'oe' in top_keys: rec_combo = f"{s_pick}{'사' if (s_pick=='우' and o_pick=='짝') or (s_pick=='좌' and o_pick=='홀') else '삼'}"
+    else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
+
+    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
+    return rec_combo, avoid_combo
+
+# 🎯 [엔진 2 연산 로직]
+def get_engine2_avoid(records_tuple):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if len(valid) < 4: return '우삼'
+
+    last, prev = valid[-1], valid[-2]
+
+    if last == prev:
+        avoid_pick = f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}"
+    elif len(valid) >= 3 and valid[-3] == last:
+        avoid_pick = last
+    else:
+        avoid_pick = f"{last[0]}{OPPOSITE_SINGLE_MAP[last[1]]}"
+
+    return avoid_pick
+
+# 🎯 [통합 메인 연산]
+def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
-            'rec': '우삼', 'avoid': '좌사',
-            'start_pick': '우', 'line_pick': '삼', 'oe_pick': '홀',
-            'start_mode': '기본', 'line_mode': '기본', 'oe_mode': '기본',
-            'top2_info': '데이터 수집 중', 'pattern_str': '-',
-            'bet_guide': '⛔ 패스 추천 (데이터 부족)', 'bet_class': 'pass'
+            'rec1': '우삼', 'avoid1': '좌사', 'avoid2': '우삼',
+            'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
-    start_stream = [ITEM_MAP[r][0] for r in valid]
-    line_stream = [ITEM_MAP[r][1] for r in valid]
-    oe_stream = [ITEM_MAP[r][2] for r in valid]
+    rec1, avoid1 = get_engine1_picks(records_tuple, prev_failures)
+    avoid2 = get_engine2_avoid(records_tuple)
 
-    s_pick, s_w, s_mode = analyze_pure_rule_axis(start_stream, '우', '좌', prev_failures['start'])
-    l_pick, l_w, l_mode = analyze_pure_rule_axis(line_stream, '삼', '사', prev_failures['line'])
-    o_pick, o_w, o_mode = analyze_pure_rule_axis(oe_stream, '홀', '짝', prev_failures['oe'])
-
-    axes = [
-        ('start', s_pick, s_w, s_mode, '출발'),
-        ('line', l_pick, l_w, l_mode, '줄수'),
-        ('oe', o_pick, o_w, o_mode, '홀짝')
-    ]
-    sorted_axes = sorted(axes, key=lambda x: x[2], reverse=True)
-
-    top1 = sorted_axes[0]
-    top2 = sorted_axes[1]
-    top3 = sorted_axes[2]
-
-    top_keys = {top1[0], top2[0]}
-
-    if 'start' in top_keys and 'line' in top_keys:
-        combo_base = f"{s_pick}{l_pick}"
-        rec_combo = [c for c in ALL_COMBOS if c.startswith(combo_base)][0]
-    elif 'start' in top_keys and 'oe' in top_keys:
-        if (s_pick == '우' and o_pick == '짝') or (s_pick == '좌' and o_pick == '홀'):
-            l_derived = '사'
-        else:
-            l_derived = '삼'
-        rec_combo = f"{s_pick}{l_derived}"
-    else:
-        if (l_pick == '사' and o_pick == '짝') or (l_pick == '삼' and o_pick == '홀'):
-            s_derived = '우'
-        else:
-            s_derived = '좌'
-        rec_combo = f"{s_derived}{l_pick}"
-
-    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     pattern_display = " ➔ ".join(valid[-4:])
 
-    # 🎯 배팅 추천 / 패스 가이드 연산
     if last_avoid_failed:
         bet_guide = "⛔ 패스 권장 (직전 지울픽 실패 - 변칙 구간 방어)"
-    elif top1[2] >= 85 and top2[2] >= 85:
-        bet_guide = "🔥 강한 배팅 추천 (GO! - 정석 패턴 포착)"
-    elif top1[2] >= 78 and top2[2] >= 78:
-        bet_guide = "🟡 일반 배팅 (NORMAL - 기본 고정 배팅)"
+    elif avoid1 == avoid2:
+        bet_guide = f"🔥 [더블 지울픽 일치] 지울픽: `{avoid1}` ({ITEM_FULL_MAP[avoid1]}) ➔ 3마킹 강한 배팅 (GO)"
     else:
-        bet_guide = "⛔ 패스 권장 (PASS - 패턴 불명확)"
-
-    top2_info = f"1위 {top1[4]}({top1[1]}, {top1[3]}) + 2위 {top2[4]}({top2[1]}, {top2[3]}) 조합"
+        bet_guide = f"⛔ [지울픽 불일치] 엔진1:`{avoid1}` vs 엔진2:`{avoid2}` ➔ 패스 권장 (PASS)"
 
     return {
-        'rec': rec_combo,
-        'avoid': avoid_combo,
-        'start_pick': s_pick, 'start_mode': s_mode,
-        'line_pick': l_pick, 'line_mode': l_mode,
-        'oe_pick': o_pick, 'oe_mode': o_mode,
-        'top2_info': top2_info,
+        'rec1': rec1,
+        'avoid1': avoid1,
+        'avoid2': avoid2,
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
@@ -248,7 +217,8 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     if n < 4: return None, {}
 
     tot = 0
-    rec_win, avoid_win = 0, 0
+    avoid1_win, avoid2_win = 0, 0
+    double_match_tot, double_match_win = 0, 0
     avoid_win_streak, max_avoid_win_streak = 0, 0
     avoid_lose_streak, max_avoid_lose_streak = 0, 0
 
@@ -264,7 +234,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_pure_ab_combined(past_sub, prev_failures, last_avoid_failed)
+            res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -273,9 +243,8 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
-            if res['rec'] == act: rec_win += 1
-            if res['avoid'] != act:
-                avoid_win += 1
+            if res['avoid1'] != act:
+                avoid1_win += 1
                 avoid_win_streak += 1
                 avoid_lose_streak = 0
                 if avoid_win_streak > max_avoid_win_streak: max_avoid_win_streak = avoid_win_streak
@@ -284,15 +253,25 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 avoid_win_streak = 0
                 if avoid_lose_streak > max_avoid_lose_streak: max_avoid_lose_streak = avoid_lose_streak
 
-        prev_failures['start'] = (res['start_pick'] != act_s)
-        prev_failures['line'] = (res['line_pick'] != act_l)
-        prev_failures['oe'] = (res['oe_pick'] != act_o)
-        last_avoid_failed = (res['avoid'] == act)
+            if res['avoid2'] != act: avoid2_win += 1
+
+            if res['avoid1'] == res['avoid2']:
+                double_match_tot += 1
+                if res['avoid1'] != act: double_match_win += 1
+
+        # 🎯 핵심 복구: B엔진 전환 판단을 원래의 '추천픽 실패 여부'로 정확하게 계산
+        rec_s, rec_l, rec_o = ITEM_MAP[res['rec1']]
+        prev_failures['start'] = (rec_s != act_s)
+        prev_failures['line'] = (rec_l != act_l)
+        prev_failures['oe'] = (rec_o != act_o)
+        last_avoid_failed = (res['avoid1'] == act)
 
     stats = {
         'tot': tot,
-        'rec_win': rec_win, 'rec_lose': tot - rec_win, 'rec_rate': (rec_win/tot*100.0) if tot > 0 else 0.0,
-        'avoid_win': avoid_win, 'avoid_lose': tot - avoid_win, 'avoid_rate': (avoid_win/tot*100.0) if tot > 0 else 0.0,
+        'avoid1_win': avoid1_win, 'avoid1_rate': (avoid1_win/tot*100.0) if tot > 0 else 0.0,
+        'avoid2_win': avoid2_win, 'avoid2_rate': (avoid2_win/tot*100.0) if tot > 0 else 0.0,
+        'double_tot': double_match_tot, 'double_win': double_match_win,
+        'double_rate': (double_match_win/double_match_tot*100.0) if double_match_tot > 0 else 0.0,
         'max_avoid_win_streak': max_avoid_win_streak,
         'max_avoid_lose_streak': max_avoid_lose_streak,
         'prev_failures': prev_failures,
@@ -389,21 +368,22 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
     recent_cnt = len(records)
-    st.markdown(f"**누적 알고리즘 성적 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 2중 지울픽 성적 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
-        st.markdown(f"🔥 **추천픽 적중률 : {recent_stat['rec_win']}승 {recent_stat['rec_lose']}패 (승률 {recent_stat['rec_rate']:.1f}%)**")
-        st.markdown(f"⛔ **지울픽 성공률 : {recent_stat['avoid_win']}승 {recent_stat['avoid_lose']}패 (성공률 {recent_stat['avoid_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 (성공률 {recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 (성공률 {recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🔥 **더블 일치 시 성공률 : {recent_stat['double_win']}승/{recent_stat['double_tot']}회 (성공률 {recent_stat['double_rate']:.1f}%)**")
 
     st.markdown("---")
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 알고리즘 성적 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 2중 지울픽 성적 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"🔥 **추천픽 적중률 : {today_stat['rec_win']}승 {today_stat['rec_lose']}패 (승률 {today_stat['rec_rate']:.1f}%)**")
-        st.markdown(f"⛔ **지울픽 성공률 : {today_stat['avoid_win']}승 {today_stat['avoid_lose']}패 (성공률 {today_stat['avoid_rate']:.1f}%)**")
-        st.markdown(f"   🛡️ **지울픽 성적 : 최다 {today_stat['max_avoid_win_streak']}연속 성공 / 최다 {today_stat['max_avoid_lose_streak']}연속 나와버림**")
+        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승/{today_stat['double_tot']}회 (성공률 {today_stat['double_rate']:.1f}%)**")
+        st.markdown(f"   🛡️ **최다 연승 성적 : 최다 {today_stat['max_avoid_win_streak']}연속 안나옴 성공**")
 
     st.markdown("---")
 
@@ -416,30 +396,27 @@ else:
             st.markdown("결과 : **패스(PASS)**")
         else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
-            rec_ok = "추천적중 🎯" if prev_res and prev_res['rec'] == prev_actual else "추천미적중 ❌"
-            avoid_ok = "안나옴 성공 🎯" if prev_res and prev_res['avoid'] != prev_actual else "나와버림 ❌"
+            avoid1_ok = "성공 🎯" if prev_res and prev_res['avoid1'] != prev_actual else "나와버림 ❌"
+            avoid2_ok = "성공 🎯" if prev_res and prev_res['avoid2'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
-                st.markdown(f"🔥 **조합 추천픽 ({prev_res['rec']}) ➔ {rec_ok}** / ⛔ **조합 지울픽 ({prev_res['avoid']}) ➔ {avoid_ok}**")
+                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']}) ➔ {avoid1_ok}** / ⛔ **엔진2 지울픽 ({prev_res['avoid2']}) ➔ {avoid2_ok}**")
 
     st.markdown("---")
 
     p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
     l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
-    curr_res = analyze_pure_ab_combined(records_tuple, p_fails, l_avoid_fail)
+    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 배팅가이드 분석 ( {next_round}회차 )**")
-    st.markdown(f"📢 **[배팅 가이드]: `{curr_res['bet_guide']}`**")
+    st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
+    st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    st.markdown(f"🔍 **3축 엔진 연산**: 출발 `{curr_res['start_pick']}` ({curr_res['start_mode']}) | 줄수 `{curr_res['line_pick']}` ({curr_res['line_mode']}) | 홀짝 `{curr_res['oe_pick']}` ({curr_res['oe_mode']})")
-    st.markdown(f"💡 **조합 상태**: `{curr_res['top2_info']}`")
-    st.markdown(" ")
-    st.markdown(f"🔥 **[최종 추천픽] 추천: `{curr_res['rec']}` ({ITEM_FULL_MAP[curr_res['rec']]})**")
-    st.markdown(f"⛔ **[최종 지울픽] 제외: `{curr_res['avoid']}` ({ITEM_FULL_MAP[curr_res['avoid']]})**")
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]})** `[3축 A/B 가변]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]})** `[마르코프 이행]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -507,7 +484,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (배팅가이드 리스트)**")
+    st.markdown("**오늘 세부 결과 (2중 지울픽 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
@@ -518,13 +495,13 @@ else:
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
 
-            rec_match = "적중 🎯" if res_prev and res_prev['rec'] == act_item else "미적중 ❌"
-            avoid_match = "성공 🎯" if res_prev and res_prev['avoid'] != act_item else "나와버림 ❌"
+            avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
+            avoid2_match = "성공 🎯" if res_prev and res_prev['avoid2'] != act_item else "나와버림 ❌"
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "추천픽 / 결과": f"{res_prev['rec'] if res_prev else '-'} / {rec_match}",
-                "지울픽 / 결과": f"{res_prev['avoid'] if res_prev else '-'} / {avoid_match}"
+                "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} / {avoid1_match}",
+                "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} / {avoid2_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
