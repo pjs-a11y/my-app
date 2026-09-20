@@ -83,9 +83,7 @@ OPPOSITE_SINGLE_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
-# 🎯 [KST 한국 표준시 기준 정밀 회차 계산]
 def get_current_realtime_round():
-    # UTC+9 한국 표준시 강제 지정
     kst = timezone(timedelta(hours=9))
     now = datetime.now(kst)
     total_minutes = now.hour * 60 + now.minute
@@ -173,24 +171,40 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2 연산 로직]
+# 🎯 [엔진 2: 정밀 데칼 방어 연산 로직]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
     if n < 4: return '우삼', '기본', '우'
 
     last = valid[-1]
-    
+
+    # 🛠️ 1. 데칼 대칭 감시 (6, 4, 2회차 전 기준 정밀 1:1 대칭 마디 매칭)
+    # A - B - C - B - A (5개 진행 중 -> 다음은 C의 대칭인 A 조합 출현 필수)
+    for span in [3, 2, 1]:
+        if n >= (span * 2 + 1):
+            center_idx = n - 1 - span
+            is_decal = True
+            for offset in range(1, span + 1):
+                if valid[center_idx - offset] != valid[center_idx + offset]:
+                    is_decal = False
+                    break
+            
+            if is_decal:
+                # 다음 나와야 할 완벽한 대칭 결과
+                decal_target = valid[center_idx - span]
+                # 지울픽은 대칭 결과의 반대 조합으로 지정 (대칭 결과 보호)
+                avoid_decal = f"{OPPOSITE_SINGLE_MAP[decal_target[0]]}{OPPOSITE_SINGLE_MAP[decal_target[1]]}"
+                return avoid_decal, f'특수({span*2+1}회차데칼)', OPPOSITE_SINGLE_MAP[decal_target[0]]
+
+    # 2. 방어 분석 모드
     if last_e2_failed:
-        if n >= 5 and valid[-1] == valid[-5] and valid[-2] == valid[-4]:
-            avoid = valid[-3]
-            return avoid, '방어(데칼)', OPPOSITE_SINGLE_MAP[avoid[0]]
         if n >= 4 and valid[-1] != valid[-2] and valid[-2] == valid[-3] and valid[-3] == valid[-4]:
-            avoid = valid[-1]
-            return avoid, '방어(계단)', OPPOSITE_SINGLE_MAP[avoid[1]]
+            return valid[-1], '방어(계단)', OPPOSITE_SINGLE_MAP[valid[-1][1]]
         avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{last[1]}"
         return avoid, '방어(변칙)', OPPOSITE_SINGLE_MAP[last[0]]
 
+    # 3. 기본 3박스 / 31뿔 / 12뿔 감시
     run_len = 1
     for k in range(n-1, 0, -1):
         if valid[k] == valid[k-1]: run_len += 1
@@ -407,7 +421,6 @@ else:
             last_rd = last_rec['round']
             last_dt_str = last_rec['date']
             
-            # 현재 실제 회차 이전까지 PASS 추가
             if last_dt_str == real_date_str and last_rd < real_round_num - 1:
                 for rd in range(last_rd + 1, real_round_num):
                     st.session_state.records.append({'date': real_date_str, 'round': rd, 'result': "PASS"})
