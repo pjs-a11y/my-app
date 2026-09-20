@@ -3,7 +3,7 @@ import re
 import copy
 import pandas as pd
 import streamlit as st
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
 st.set_page_config(page_title="키노사다리 2중 지울픽 분석기", page_icon="⚡", layout="centered")
@@ -83,8 +83,11 @@ OPPOSITE_SINGLE_MAP = {
 
 WEEKDAYS = ['월요일', '화요일', '수요일', '목요일', '금요일', '토요일', '일요일']
 
+# 🎯 [KST 한국 표준시 기준 정밀 회차 계산]
 def get_current_realtime_round():
-    now = datetime.now()
+    # UTC+9 한국 표준시 강제 지정
+    kst = timezone(timedelta(hours=9))
+    now = datetime.now(kst)
     total_minutes = now.hour * 60 + now.minute
     current_round = (total_minutes // 5) + 1
     if current_round > 288:
@@ -131,7 +134,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1 연산 로직 + 단일 지울 구멍 연산]
+# 🎯 [엔진 1 연산 로직]
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70, '기본'
@@ -165,14 +168,12 @@ def get_engine1_picks(records_tuple, prev_failures):
     else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
 
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    
-    # 가중치가 가장 높은 축의 반대 단일 속성을 '가장 안 나올 1개 구멍'으로 추출
     top_axis_pick = axes[0][1]
     single_hole = OPPOSITE_SINGLE_MAP[top_axis_pick]
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2 연산 로직 + 단일 지울 구멍 연산]
+# 🎯 [엔진 2 연산 로직]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
@@ -196,7 +197,7 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
         else: break
 
     if run_len == 3:
-        return last, '기본(3박스)', ITEM_MAP[last][1] # 줄수 구멍
+        return last, '기본(3박스)', ITEM_MAP[last][1]
 
     if run_len == 1 and n >= 4:
         prev_run = 0
@@ -204,11 +205,11 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
             if valid[k] == valid[n-2]: prev_run += 1
             else: break
         if prev_run == 3:
-            return valid[-2], '기본(31뿔)', ITEM_MAP[valid[-2]][0] # 출발 구멍
+            return valid[-2], '기본(31뿔)', ITEM_MAP[valid[-2]][0]
 
     if run_len == 2 and n >= 5:
         if valid[-3] != valid[-2] and valid[-4] == valid[-3]:
-            return last, '기본(12뿔)', ITEM_MAP[last][2] # 홀짝 구멍
+            return last, '기본(12뿔)', ITEM_MAP[last][2]
 
     s_stream = [ITEM_MAP[r][0] for r in valid]
     l_stream = [ITEM_MAP[r][1] for r in valid]
@@ -217,7 +218,7 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     avoid_l = OPPOSITE_SINGLE_MAP[l_stream[-1]] if l_stream[-1] == l_stream[-2] else l_stream[-1]
 
     avoid = f"{avoid_s}{avoid_l}"
-    single_hole = avoid_s # 기본 출발축 구멍
+    single_hole = avoid_s
     return avoid, '기본(패턴)', single_hole
 
 # 🎯 [통합 메인 연산]
@@ -403,7 +404,16 @@ else:
     with col_sync:
         if st.button("⏰ 현재 회차로 점프", use_container_width=True):
             push_backup()
-            st.session_state.records.append({'date': real_date_str, 'round': real_round_num - 1, 'result': "PASS"})
+            last_rd = last_rec['round']
+            last_dt_str = last_rec['date']
+            
+            # 현재 실제 회차 이전까지 PASS 추가
+            if last_dt_str == real_date_str and last_rd < real_round_num - 1:
+                for rd in range(last_rd + 1, real_round_num):
+                    st.session_state.records.append({'date': real_date_str, 'round': rd, 'result': "PASS"})
+            elif last_dt_str != real_date_str:
+                st.session_state.records.append({'date': real_date_str, 'round': real_round_num - 1, 'result': "PASS"})
+
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
             st.cache_data.clear()
@@ -475,7 +485,6 @@ else:
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    # 🛠️ 지울 구멍 단일 속성 직관적 표출
     st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]}) ▶ 지울 구멍: `{curr_res['hole1']}`** `[3축 A/B 가변]`")
     st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]}) ▶ 지울 구멍: `{curr_res['hole2']}`** `[{curr_res.get('e2_mode', '특수패턴')}]`")
 
