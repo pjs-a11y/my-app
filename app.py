@@ -113,7 +113,7 @@ def sync_all_records_db(records):
                 supabase.table("ladder_records").delete().in_("id", id_list[i:i + 200]).execute()
 
         if trimmed_records:
-            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in trimmed_records]
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in bulk_list]
             for i in range(0, len(bulk_list), 100):
                 supabase.table("ladder_records").insert(bulk_list[i:i + 100]).execute()
     except Exception: pass
@@ -179,8 +179,6 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
 
     last = valid[-1]
 
-    # 🛠️ 1. 데칼 대칭 감시 (6, 4, 2회차 전 기준 정밀 1:1 대칭 마디 매칭)
-    # A - B - C - B - A (5개 진행 중 -> 다음은 C의 대칭인 A 조합 출현 필수)
     for span in [3, 2, 1]:
         if n >= (span * 2 + 1):
             center_idx = n - 1 - span
@@ -191,20 +189,16 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
                     break
             
             if is_decal:
-                # 다음 나와야 할 완벽한 대칭 결과
                 decal_target = valid[center_idx - span]
-                # 지울픽은 대칭 결과의 반대 조합으로 지정 (대칭 결과 보호)
                 avoid_decal = f"{OPPOSITE_SINGLE_MAP[decal_target[0]]}{OPPOSITE_SINGLE_MAP[decal_target[1]]}"
                 return avoid_decal, f'특수({span*2+1}회차데칼)', OPPOSITE_SINGLE_MAP[decal_target[0]]
 
-    # 2. 방어 분석 모드
     if last_e2_failed:
         if n >= 4 and valid[-1] != valid[-2] and valid[-2] == valid[-3] and valid[-3] == valid[-4]:
             return valid[-1], '방어(계단)', OPPOSITE_SINGLE_MAP[valid[-1][1]]
         avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{last[1]}"
         return avoid, '방어(변칙)', OPPOSITE_SINGLE_MAP[last[0]]
 
-    # 3. 기본 3박스 / 31뿔 / 12뿔 감시
     run_len = 1
     for k in range(n-1, 0, -1):
         if valid[k] == valid[k-1]: run_len += 1
@@ -536,10 +530,11 @@ else:
         st.cache_data.clear()
         st.rerun()
 
+    # 🛠️ 직전 취소 버튼 로직: 직전 1개 회차(1 step)만 깔끔하게 빼주는 직관적인 로직
     if st.button("직전취소", use_container_width=True, key="btn_cancel"):
         if st.session_state.records:
             push_backup()
-            st.session_state.records.pop()
+            st.session_state.records.pop() # 딱 1개 회차만 삭제
             delete_last_record_db()
             st.cache_data.clear()
             st.rerun()
