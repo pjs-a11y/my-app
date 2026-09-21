@@ -113,7 +113,7 @@ def sync_all_records_db(records):
                 supabase.table("ladder_records").delete().in_("id", id_list[i:i + 200]).execute()
 
         if trimmed_records:
-            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in bulk_list]
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in trimmed_records]
             for i in range(0, len(bulk_list), 100):
                 supabase.table("ladder_records").insert(bulk_list[i:i + 100]).execute()
     except Exception: pass
@@ -171,7 +171,7 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2: 정밀 데칼 방어 연산 로직]
+# 🎯 [엔진 2: 데칼 방어 연산 로직]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
@@ -415,6 +415,7 @@ else:
             last_rd = last_rec['round']
             last_dt_str = last_rec['date']
             
+            # 🛠️ 점프 시 PASS 들을 DB와 동기화하여 확실하게 개별 저장
             if last_dt_str == real_date_str and last_rd < real_round_num - 1:
                 for rd in range(last_rd + 1, real_round_num):
                     st.session_state.records.append({'date': real_date_str, 'round': rd, 'result': "PASS"})
@@ -530,12 +531,12 @@ else:
         st.cache_data.clear()
         st.rerun()
 
-    # 🛠️ 직전 취소 버튼 로직: 직전 1개 회차(1 step)만 깔끔하게 빼주는 직관적인 로직
+    # 🛠️ 직전 취소 로직: 세션과 DB에서 딱 마지막 1개 회차만 완벽하게 제거
     if st.button("직전취소", use_container_width=True, key="btn_cancel"):
         if st.session_state.records:
             push_backup()
-            st.session_state.records.pop() # 딱 1개 회차만 삭제
-            delete_last_record_db()
+            st.session_state.records.pop() # 세션 메모리에서 1개 제거
+            delete_last_record_db()       # DB에서도 마지막 1개 행 정확히 삭제
             st.cache_data.clear()
             st.rerun()
 
