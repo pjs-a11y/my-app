@@ -353,9 +353,9 @@ if "history_store" not in st.session_state:
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
-# 🛠️ 타겟 입력 회차 조절용 세션 상태 추가
-if "target_offset" not in st.session_state:
-    st.session_state.target_offset = 0
+# 🛠️ 수동 타겟 회차 상태 관리 (기본값 None)
+if "manual_target_round" not in st.session_state:
+    st.session_state.manual_target_round = None
 
 def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
@@ -386,6 +386,7 @@ if st.session_state.show_bulk:
             st.cache_data.clear()
             st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
             st.session_state.show_bulk = False
+            st.session_state.manual_target_round = None
             st.rerun()
     if col_b2.button("❌ 취소", use_container_width=True):
         st.session_state.show_bulk = False
@@ -414,25 +415,23 @@ else:
         st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
     
     with col_sync:
-        # 🛠️ 점프 버튼: 데이터 추가 없이 화면 타겟 회차만 실시간 회차로 바로 이동
+        # 🛠️ [현재 회차로 점프]: 날짜를 오늘(real_date_str)로 고정하고 회차를 오늘 실시간 회차로 설정
         if st.button("⏰ 현재 회차로 점프", use_container_width=True):
-            st.session_state.target_offset = 0
-            st.toast("현재 실시간 회차로 이동했습니다!")
+            st.session_state.manual_target_round = real_round_num
+            st.toast(f"오늘 ({real_date_str}) {real_round_num}회차로 이동했습니다!")
             st.rerun()
 
-    # 타겟 회차 계산 (offset 적용)
-    base_next_round = last_rec['round'] + 1 if last_rec['round'] < 288 else 1
-    base_curr_date = last_rec['date'] if last_rec['round'] < 288 else (datetime.strptime(last_rec['date'], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-
-    # 점프 시에는 실제 현재 시각 회차가 기준
-    if st.session_state.target_offset == 0:
-        next_round = real_round_num
-        curr_date = real_date_str
+    # 🛠️ 화면 타겟 회차 및 날짜 결정 로직 (어제 날짜에 얽매이지 않도록 보정)
+    if st.session_state.manual_target_round is not None:
+        next_round = st.session_state.manual_target_round
+        curr_date = real_date_str  # 수동 이동 중에는 오늘 날짜 기준
     else:
-        calc_rd = base_next_round + st.session_state.target_offset
-        if calc_rd < 1: calc_rd = 1
-        next_round = calc_rd
-        curr_date = base_curr_date
+        if last_rec['round'] >= 288:
+            next_round = 1
+            curr_date = (datetime.strptime(last_rec['date'], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
+        else:
+            next_round = last_rec['round'] + 1
+            curr_date = last_rec['date']
 
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
         st.session_state.show_bulk = True
@@ -514,7 +513,12 @@ else:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, next_round, input_val)
-        st.session_state.target_offset = 0 # 입력 시 타겟 리셋
+        
+        # 🛠️ 데이터 입력 시 수동 타겟 회차 자동 다음 회차로 업데이트
+        if st.session_state.manual_target_round is not None:
+            st.session_state.manual_target_round += 1
+            if st.session_state.manual_target_round > 288:
+                st.session_state.manual_target_round = 1
         st.cache_data.clear()
         st.rerun()
 
@@ -528,16 +532,21 @@ else:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, next_round, "PASS")
-        st.session_state.target_offset = 0
+        
+        if st.session_state.manual_target_round is not None:
+            st.session_state.manual_target_round += 1
+            if st.session_state.manual_target_round > 288:
+                st.session_state.manual_target_round = 1
         st.toast(f"{next_round}회차 패스")
         st.cache_data.clear()
         st.rerun()
 
-    # 🛠️ 버튼 이름 및 기능 변경: 데이터를 지우지 않고 회차 위치만 1회차 뒤로 이동
+    # 🛠️ [직전회차로 이동]: 현재 표시 중인 회차에서 무조건 -1만 실행! (어제로 절대 안 튕김)
     if st.button("⬅️ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
-        if next_round > 1:
-            st.session_state.target_offset -= 1
-            st.toast(f"{next_round - 1}회차로 이동했습니다.")
+        curr_target = next_round
+        if curr_target > 1:
+            st.session_state.manual_target_round = curr_target - 1
+            st.toast(f"{curr_target - 1}회차로 이동했습니다.")
             st.rerun()
 
     if st.button("초기화", use_container_width=True, key="btn_reset"):
@@ -545,7 +554,7 @@ else:
         st.session_state.records = []
         st.session_state.history_stack = []
         st.session_state.history_store = {}
-        st.session_state.target_offset = 0
+        st.session_state.manual_target_round = None
         sync_all_records_db([])
         st.cache_data.clear()
         st.rerun()
@@ -553,7 +562,7 @@ else:
     if st.button("되돌리기", use_container_width=True, key="btn_undo"):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
-            st.session_state.target_offset = 0
+            st.session_state.manual_target_round = None
             sync_all_records_db(st.session_state.records)
             st.cache_data.clear()
             st.rerun()
