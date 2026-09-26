@@ -282,7 +282,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
     for i in range(3, n):
         act = records_tuple[i][2]
-        rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
 
         res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
@@ -473,12 +472,25 @@ else:
 
     st.markdown("---")
 
-    p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
-    l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
-    l_e2_fail = recent_stat['last_e2_failed'] if recent_stat else False
+    # 🛠️ [핵심 보정]: 타겟 회차에 일치하도록 분석용 데이터 배열(records_tuple)의 범위를 슬라이싱!
+    # 해당 타겟 회차 직전 회차까지만 잘라서 엔진에 전달합니다.
+    target_idx = len(records_tuple)
+    if st.session_state.manual_target_round is not None:
+        for idx, rec in enumerate(records_tuple):
+            if rec[0] == curr_date and rec[1] >= next_round:
+                target_idx = idx
+                break
+
+    sliced_records_tuple = records_tuple[:target_idx]
+
+    # 잘라낸 슬라이싱 데이터를 기반으로 통계/실패 데이터 추출
+    sliced_stat, _ = calculate_stats(sliced_records_tuple, {})
+    p_fails = sliced_stat['prev_failures'] if sliced_stat else {'start': False, 'line': False, 'oe': False}
+    l_avoid_fail = sliced_stat['last_avoid_failed'] if sliced_stat else False
+    l_e2_fail = sliced_stat['last_e2_failed'] if sliced_stat else False
     
-    # 🛠️ 회차 이동 중 동일 추천픽 보정: 실시간 입력 데이터 기준의 일관된 연산 적용
-    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail, l_e2_fail)
+    # 슬라이싱된 데이터로 정확하게 추천픽 연산 (회차별로 완벽하게 달라집니다)
+    curr_res = analyze_double_avoid_system(sliced_records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
