@@ -472,8 +472,6 @@ else:
 
     st.markdown("---")
 
-    # 🛠️ [핵심 보정]: 타겟 회차에 일치하도록 분석용 데이터 배열(records_tuple)의 범위를 슬라이싱!
-    # 해당 타겟 회차 직전 회차까지만 잘라서 엔진에 전달합니다.
     target_idx = len(records_tuple)
     if st.session_state.manual_target_round is not None:
         for idx, rec in enumerate(records_tuple):
@@ -483,13 +481,11 @@ else:
 
     sliced_records_tuple = records_tuple[:target_idx]
 
-    # 잘라낸 슬라이싱 데이터를 기반으로 통계/실패 데이터 추출
     sliced_stat, _ = calculate_stats(sliced_records_tuple, {})
     p_fails = sliced_stat['prev_failures'] if sliced_stat else {'start': False, 'line': False, 'oe': False}
     l_avoid_fail = sliced_stat['last_avoid_failed'] if sliced_stat else False
     l_e2_fail = sliced_stat['last_e2_failed'] if sliced_stat else False
     
-    # 슬라이싱된 데이터로 정확하게 추천픽 연산 (회차별로 완벽하게 달라집니다)
     curr_res = analyze_double_avoid_system(sliced_records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
@@ -517,10 +513,8 @@ else:
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, next_round, input_val)
         
-        if st.session_state.manual_target_round is not None:
-            st.session_state.manual_target_round += 1
-            if st.session_state.manual_target_round > 288:
-                st.session_state.manual_target_round = 1
+        # 🛠️ 수동 타겟 초기화: DB의 마지막 데이터(새로 추가된 데이터) 기준으로 다음 회차가 자연스럽게 +1 계산되도록 설정
+        st.session_state.manual_target_round = None
         st.cache_data.clear()
         st.rerun()
 
@@ -535,10 +529,7 @@ else:
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, next_round, "PASS")
         
-        if st.session_state.manual_target_round is not None:
-            st.session_state.manual_target_round += 1
-            if st.session_state.manual_target_round > 288:
-                st.session_state.manual_target_round = 1
+        st.session_state.manual_target_round = None
         st.toast(f"{next_round}회차 패스")
         st.cache_data.clear()
         st.rerun()
