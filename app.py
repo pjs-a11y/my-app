@@ -472,6 +472,7 @@ else:
 
     st.markdown("---")
 
+    # 🛠️ [타겟 회차 데이터 잘라내기 정밀 보정]
     target_idx = len(records_tuple)
     if st.session_state.manual_target_round is not None:
         for idx, rec in enumerate(records_tuple):
@@ -481,11 +482,13 @@ else:
 
     sliced_records_tuple = records_tuple[:target_idx]
 
+    # 잘라낸 슬라이싱 데이터의 '마지막 상태'를 완벽히 계산하여 A/B 엔진 스와프 플래그 추출
     sliced_stat, _ = calculate_stats(sliced_records_tuple, {})
     p_fails = sliced_stat['prev_failures'] if sliced_stat else {'start': False, 'line': False, 'oe': False}
     l_avoid_fail = sliced_stat['last_avoid_failed'] if sliced_stat else False
     l_e2_fail = sliced_stat['last_e2_failed'] if sliced_stat else False
     
+    # 해당 타겟 회차 시점의 정확한 지울픽 분석
     curr_res = analyze_double_avoid_system(sliced_records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
@@ -507,13 +510,17 @@ else:
 
     if input_val:
         push_backup()
+        # 🛠️ 수동 회차 상태에서 입력 시 해당 회차 이후의 기존 데이터(미래 데이터)를 깔끔하게 정제
+        if st.session_state.manual_target_round is not None:
+            st.session_state.records = list(sliced_records_tuple)
+        
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            sync_all_records_db(st.session_state.records)
-        else: add_single_record_db(curr_date, next_round, input_val)
+            
+        sync_all_records_db(st.session_state.records)
         
-        # 🛠️ 수동 타겟 초기화: DB의 마지막 데이터(새로 추가된 데이터) 기준으로 다음 회차가 자연스럽게 +1 계산되도록 설정
+        # 입력 후 수동 모드를 해제하여 다음 회차(+1)로 정상 진행
         st.session_state.manual_target_round = None
         st.cache_data.clear()
         st.rerun()
@@ -523,12 +530,14 @@ else:
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
+        if st.session_state.manual_target_round is not None:
+            st.session_state.records = list(sliced_records_tuple)
+
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            sync_all_records_db(st.session_state.records)
-        else: add_single_record_db(curr_date, next_round, "PASS")
-        
+            
+        sync_all_records_db(st.session_state.records)
         st.session_state.manual_target_round = None
         st.toast(f"{next_round}회차 패스")
         st.cache_data.clear()
