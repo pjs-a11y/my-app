@@ -29,7 +29,6 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 가로 4열 고정 버튼 스타일 */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
@@ -342,8 +341,9 @@ def calculate_stats(records_tuple, target_date=None):
     }
     return stats, history_picks
 
-# 🛠️ 앱 실행 시 DB 데이터를 무조건 로드하여 세션에 보존
-st.session_state.records = load_data()
+# 🛠️ [세션 최초 1회만 DB 로드하여 상단 덮어쓰기 에러 차단]
+if "records" not in st.session_state:
+    st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -356,7 +356,6 @@ records = st.session_state.records
 records_tuple = tuple((r['date'], r['result']) for r in records)
 curr_date = get_today_str()
 
-# 오늘 입력된 데이터 수 카운트 (자정 지나면 오늘 날짜 데이터가 없으므로 0부터 시작)
 today_records_count = sum(1 for r in records if r['date'] == curr_date)
 next_round_num = today_records_count + 1
 
@@ -374,7 +373,6 @@ if st.session_state.show_bulk:
                 st.session_state.records.append({'date': dt_str, 'result': item})
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
-            st.cache_data.clear()
             st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
             st.session_state.show_bulk = False
             st.rerun()
@@ -387,16 +385,16 @@ elif not records:
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("우삼", key="init_btn_우삼", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우삼'}); add_single_record_db(curr_date, '우삼'); st.cache_data.clear(); st.rerun()
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우삼'}); add_single_record_db(curr_date, '우삼'); st.rerun()
     with col2:
         if st.button("우사", key="init_btn_우사", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우사'}); add_single_record_db(curr_date, '우사'); st.cache_data.clear(); st.rerun()
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우사'}); add_single_record_db(curr_date, '우사'); st.rerun()
     with col3:
         if st.button("좌삼", key="init_btn_좌삼", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌삼'}); add_single_record_db(curr_date, '좌삼'); st.cache_data.clear(); st.rerun()
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌삼'}); add_single_record_db(curr_date, '좌삼'); st.rerun()
     with col4:
         if st.button("좌사", key="init_btn_좌사", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌사'}); add_single_record_db(curr_date, '좌사'); st.cache_data.clear(); st.rerun()
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌사'}); add_single_record_db(curr_date, '좌사'); st.rerun()
 
 else:
     last_rec = records[-1]
@@ -466,7 +464,6 @@ else:
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
-    # 가로 4열 배치
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("우삼", key="btn_우삼", use_container_width=True):
@@ -476,7 +473,6 @@ else:
                 st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
                 sync_all_records_db(st.session_state.records)
             else: add_single_record_db(curr_date, '우삼')
-            st.cache_data.clear()
             st.rerun()
     with col2:
         if st.button("우사", key="btn_우사", use_container_width=True):
@@ -486,7 +482,6 @@ else:
                 st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
                 sync_all_records_db(st.session_state.records)
             else: add_single_record_db(curr_date, '우사')
-            st.cache_data.clear()
             st.rerun()
     with col3:
         if st.button("좌삼", key="btn_좌삼", use_container_width=True):
@@ -496,7 +491,6 @@ else:
                 st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
                 sync_all_records_db(st.session_state.records)
             else: add_single_record_db(curr_date, '좌삼')
-            st.cache_data.clear()
             st.rerun()
     with col4:
         if st.button("좌사", key="btn_좌사", use_container_width=True):
@@ -506,7 +500,6 @@ else:
                 st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
                 sync_all_records_db(st.session_state.records)
             else: add_single_record_db(curr_date, '좌사')
-            st.cache_data.clear()
             st.rerun()
 
     st.markdown("---")
@@ -520,7 +513,6 @@ else:
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, "PASS")
         st.toast(f"{next_round_num}회차 패스 등록")
-        st.cache_data.clear()
         st.rerun()
 
     if st.button("직전 취소", use_container_width=True, key="btn_cancel"):
@@ -528,7 +520,6 @@ else:
             push_backup()
             st.session_state.records.pop()
             delete_last_record_db()
-            st.cache_data.clear()
             st.toast("직전 입력 결과가 취소되었습니다.")
             st.rerun()
 
@@ -537,14 +528,12 @@ else:
         st.session_state.records = []
         st.session_state.history_stack = []
         sync_all_records_db([])
-        st.cache_data.clear()
         st.rerun()
 
     if st.button("되돌리기", use_container_width=True, key="btn_undo"):
         if st.session_state.history_stack:
             st.session_state.records = st.session_state.history_stack.pop()
             sync_all_records_db(st.session_state.records)
-            st.cache_data.clear()
             st.rerun()
 
     export_lines = [f"{r['date']}|{r['result']}" for r in records]
