@@ -23,7 +23,7 @@ supabase = init_supabase()
 
 st.markdown("""
 <style>
-    html, body { overscroll-behavior-y: contain !important; }
+    html, body { overscroll-behavior-y: contain !important; touch-action: manipulation !important; }
     .stApp { overscroll-behavior-y: none !important; }
     .block-container { padding: 0.8rem 0.3rem 80px 0.3rem !important; }
     h1, h2, h3 { display: none !important; }
@@ -39,12 +39,16 @@ st.markdown("""
         max-width: 25% !important; min-width: 0px !important;
         padding: 0.3rem 0rem !important; font-size: 0.85rem !important;
         font-weight: bold !important; height: 38px !important;
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: transparent !important;
     }
 
     .ctrl-container .stButton { width: 100% !important; margin-bottom: 0.2rem !important; }
     .ctrl-container .stButton>button {
         padding: 0.5rem 0.1rem !important; font-size: 0.88rem !important;
         font-weight: bold !important; width: 100% !important;
+        touch-action: manipulation !important;
+        -webkit-tap-highlight-color: transparent !important;
     }
 
     .ctrl-container div[data-testid="stDownloadButton"] { width: 100% !important; margin-bottom: 0.2rem !important; }
@@ -52,6 +56,7 @@ st.markdown("""
         padding: 0.5rem 0.1rem !important; font-size: 0.88rem !important;
         font-weight: bold !important; width: 100% !important;
         background-color: #28a745 !important; color: white !important; border: none !important;
+        touch-action: manipulation !important;
     }
 
     hr { margin: 0.3rem 0 !important; border-color: #ddd !important; }
@@ -348,6 +353,10 @@ records = st.session_state.records
 records_tuple = tuple((r['date'], r['result']) for r in records)
 curr_date = get_today_str()
 
+# 🛠️ 오늘 날짜 데이터만 카운트하여 매일 자정 1회부터 시작하는 순차 회차 산출
+today_records_count = sum(1 for r in records if r['date'] == curr_date)
+next_round_num = today_records_count + 1
+
 if st.session_state.show_bulk:
     st.markdown("**📋 과거 데이터 한 번에 복사/붙여넣기**")
     b_date = st.date_input("입력할 날짜 선택", datetime.now())
@@ -383,7 +392,7 @@ elif not records:
 else:
     last_rec = records[-1]
     
-    st.markdown(f"**현재 DB 쌓인 데이터 수: {len(records)}개**")
+    st.markdown(f"**현재 DB 쌓인 데이터 수: {len(records)}개 (오늘 {today_records_count}회차 입력됨)**")
 
     if st.button("📋 텍스트 대량 추가", use_container_width=True):
         st.session_state.show_bulk = True
@@ -418,7 +427,8 @@ else:
         last_idx = len(records_tuple) - 1
         prev_res = history_picks.get(last_idx)
         prev_actual = last_rec['result']
-        st.markdown("**직전 입력 결과 분석**")
+        last_rec_round_num = today_records_count if last_rec['date'] == curr_date else "과거"
+        st.markdown(f"**직전 입력 결과 분석 ( {last_rec_round_num}회차 )**")
         if prev_actual == "PASS":
             st.markdown("결과 : **패스(PASS)**")
         else:
@@ -438,14 +448,14 @@ else:
     
     curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
-    st.markdown("**다음 회차 2중 지울픽 분석**")
+    st.markdown(f"**다음 회차 2중 지울픽 분석 ( {next_round_num}회차 입력 대기 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
     st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]}) ▶ 지울 구멍: `{curr_res['hole1']}`** `[3축 A/B 가변]`")
     st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]}) ▶ 지울 구멍: `{curr_res['hole2']}`** `[{curr_res.get('e2_mode', '특수패턴')}]`")
 
     st.markdown("---")
-    st.markdown("**결과 입력**")
+    st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
     input_val = st.segmented_control(
         label="결과 선택",
@@ -475,7 +485,7 @@ else:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
             sync_all_records_db(st.session_state.records)
         else: add_single_record_db(curr_date, "PASS")
-        st.toast("패스 등록")
+        st.toast(f"{next_round_num}회차 패스 등록")
         st.cache_data.clear()
         st.rerun()
 
@@ -514,7 +524,9 @@ else:
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
-        for i in reversed(today_indices):
+        
+        # 오늘 날짜 기준 순번(1회, 2회...) 매핑
+        for pos, i in enumerate(reversed(today_indices)):
             if i < 3: continue
             res_prev = history_picks.get(i)
             act_item = records_tuple[i][1]
@@ -524,8 +536,10 @@ else:
             avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
             avoid2_match = "성공 🎯" if res_prev and res_prev['avoid2'] != act_item else "나와버림 ❌"
 
+            actual_rd_num = len(today_indices) - pos
+
             rows.append({
-                "순번": f"{i+1}번째", "실제 결과": f"{act_item} ({act_full})",
+                "회차": f"{actual_rd_num}회", "실제 결과": f"{act_item} ({act_full})",
                 "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} [{res_prev.get('hole1','-') if res_prev else '-'}] / {avoid1_match}",
                 "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} [{res_prev.get('hole2','-') if res_prev else '-'}] / {avoid2_match}"
             })
