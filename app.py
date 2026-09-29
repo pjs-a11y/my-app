@@ -25,28 +25,29 @@ st.markdown("""
 <style>
     html, body { overscroll-behavior-y: contain !important; touch-action: manipulation !important; }
     .stApp { overscroll-behavior-y: none !important; }
-    .block-container { padding: 0.8rem 0.3rem 80px 0.3rem !important; }
+    .block-container { padding: 0.8rem 0.2rem 80px 0.2rem !important; }
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 결과 선택 가로 일렬 버튼 영역 스타일 */
+    /* 🔥 모바일에서도 강제로 가로 1줄(4열) 유지하도록 CSS 강제 커스텀 */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
+        flex-wrap: nowrap !important;
         width: 100% !important;
         gap: 2px !important;
     }
-    div[data-testid="stHorizontalBlock"] > div {
+    div[data-testid="stHorizontalBlock"] > div[data-testid="column"] {
         flex: 1 1 25% !important;
-        width: 25% !important;
         min-width: 0px !important;
+        width: 25% !important;
     }
     div[data-testid="stHorizontalBlock"] button {
         width: 100% !important;
-        height: 40px !important;
+        height: 42px !important;
         font-size: 0.85rem !important;
         font-weight: bold !important;
-        padding: 0.3rem 0rem !important;
+        padding: 0rem !important;
         touch-action: manipulation !important;
         -webkit-tap-highlight-color: transparent !important;
     }
@@ -470,7 +471,7 @@ else:
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
-    # 🛠️ [원래 가로 4열 일렬 배치 구조 복원]
+    # 🛠️ [모바일 가로 1줄 강제 고정 4열 배치]
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("우삼", key="btn_우삼", use_container_width=True):
