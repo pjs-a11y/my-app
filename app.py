@@ -282,9 +282,14 @@ def calculate_stats(records_tuple, history_store, target_date=None):
 
     for i in range(3, n):
         act = records_tuple[i][2]
+        rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
 
-        res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
+        if rd_key in history_store:
+            res = history_store[rd_key]
+        else:
+            res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
+
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
 
@@ -348,6 +353,7 @@ if "history_store" not in st.session_state:
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
 
+# 🛠️ 수동 타겟 회차 상태 관리 (기본값 None)
 if "manual_target_round" not in st.session_state:
     st.session_state.manual_target_round = None
 
@@ -409,14 +415,16 @@ else:
         st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
     
     with col_sync:
+        # 🛠️ [현재 회차로 점프]: 날짜를 오늘(real_date_str)로 고정하고 회차를 오늘 실시간 회차로 설정
         if st.button("⏰ 현재 회차로 점프", use_container_width=True):
             st.session_state.manual_target_round = real_round_num
             st.toast(f"오늘 ({real_date_str}) {real_round_num}회차로 이동했습니다!")
             st.rerun()
 
+    # 🛠️ 화면 타겟 회차 및 날짜 결정 로직 (어제 날짜에 얽매이지 않도록 보정)
     if st.session_state.manual_target_round is not None:
         next_round = st.session_state.manual_target_round
-        curr_date = real_date_str
+        curr_date = real_date_str  # 수동 이동 중에는 오늘 날짜 기준
     else:
         if last_rec['round'] >= 288:
             next_round = 1
@@ -472,24 +480,14 @@ else:
 
     st.markdown("---")
 
-    # 🛠️ [타겟 회차 데이터 잘라내기 정밀 보정]
-    target_idx = len(records_tuple)
-    if st.session_state.manual_target_round is not None:
-        for idx, rec in enumerate(records_tuple):
-            if rec[0] == curr_date and rec[1] >= next_round:
-                target_idx = idx
-                break
+    p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
+    l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
+    l_e2_fail = recent_stat['last_e2_failed'] if recent_stat else False
+    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail, l_e2_fail)
 
-    sliced_records_tuple = records_tuple[:target_idx]
-
-    # 잘라낸 슬라이싱 데이터의 '마지막 상태'를 완벽히 계산하여 A/B 엔진 스와프 플래그 추출
-    sliced_stat, _ = calculate_stats(sliced_records_tuple, {})
-    p_fails = sliced_stat['prev_failures'] if sliced_stat else {'start': False, 'line': False, 'oe': False}
-    l_avoid_fail = sliced_stat['last_avoid_failed'] if sliced_stat else False
-    l_e2_fail = sliced_stat['last_e2_failed'] if sliced_stat else False
-    
-    # 해당 타겟 회차 시점의 정확한 지울픽 분석
-    curr_res = analyze_double_avoid_system(sliced_records_tuple, p_fails, l_avoid_fail, l_e2_fail)
+    if curr_res:
+        next_rd_key = f"{curr_date}_{next_round}"
+        st.session_state.history_store[next_rd_key] = curr_res
 
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
@@ -510,18 +508,17 @@ else:
 
     if input_val:
         push_backup()
-        # 🛠️ 수동 회차 상태에서 입력 시 해당 회차 이후의 기존 데이터(미래 데이터)를 깔끔하게 정제
-        if st.session_state.manual_target_round is not None:
-            st.session_state.records = list(sliced_records_tuple)
-        
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': input_val})
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            
-        sync_all_records_db(st.session_state.records)
+            sync_all_records_db(st.session_state.records)
+        else: add_single_record_db(curr_date, next_round, input_val)
         
-        # 입력 후 수동 모드를 해제하여 다음 회차(+1)로 정상 진행
-        st.session_state.manual_target_round = None
+        # 🛠️ 데이터 입력 시 수동 타겟 회차 자동 다음 회차로 업데이트
+        if st.session_state.manual_target_round is not None:
+            st.session_state.manual_target_round += 1
+            if st.session_state.manual_target_round > 288:
+                st.session_state.manual_target_round = 1
         st.cache_data.clear()
         st.rerun()
 
@@ -530,19 +527,21 @@ else:
     st.markdown('<div class="ctrl-container">', unsafe_allow_html=True)
     if st.button("패스", use_container_width=True, key="btn_pass"):
         push_backup()
-        if st.session_state.manual_target_round is not None:
-            st.session_state.records = list(sliced_records_tuple)
-
         st.session_state.records.append({'date': curr_date, 'round': next_round, 'result': "PASS"})
         if len(st.session_state.records) > MAX_DATA_SIZE:
             st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            
-        sync_all_records_db(st.session_state.records)
-        st.session_state.manual_target_round = None
+            sync_all_records_db(st.session_state.records)
+        else: add_single_record_db(curr_date, next_round, "PASS")
+        
+        if st.session_state.manual_target_round is not None:
+            st.session_state.manual_target_round += 1
+            if st.session_state.manual_target_round > 288:
+                st.session_state.manual_target_round = 1
         st.toast(f"{next_round}회차 패스")
         st.cache_data.clear()
         st.rerun()
 
+    # 🛠️ [직전회차로 이동]: 현재 표시 중인 회차에서 무조건 -1만 실행! (어제로 절대 안 튕김)
     if st.button("⬅️ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
         curr_target = next_round
         if curr_target > 1:
