@@ -29,24 +29,24 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 결과 선택 전용 4열 버튼 스타일 */
-    .input-grid {
+    /* 결과 선택 가로 일렬 버튼 영역 스타일 */
+    div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
-        gap: 4px !important;
         width: 100% !important;
-        margin-bottom: 0.5rem !important;
+        gap: 2px !important;
     }
-    .input-grid .stButton {
+    div[data-testid="stHorizontalBlock"] > div {
         flex: 1 1 25% !important;
         width: 25% !important;
+        min-width: 0px !important;
     }
-    .input-grid .stButton > button {
+    div[data-testid="stHorizontalBlock"] button {
         width: 100% !important;
-        height: 45px !important;
-        font-size: 0.95rem !important;
+        height: 40px !important;
+        font-size: 0.85rem !important;
         font-weight: bold !important;
-        padding: 0 !important;
+        padding: 0.3rem 0rem !important;
         touch-action: manipulation !important;
         -webkit-tap-highlight-color: transparent !important;
     }
@@ -388,14 +388,19 @@ if st.session_state.show_bulk:
 
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
-    cols = st.columns(4)
-    for idx, combo in enumerate(ALL_COMBOS):
-        if cols[idx].button(combo, key=f"init_btn_{combo}", use_container_width=True):
-            push_backup()
-            st.session_state.records.append({'date': curr_date, 'result': combo})
-            add_single_record_db(curr_date, combo)
-            st.cache_data.clear()
-            st.rerun()
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("우삼", key="init_btn_우삼", use_container_width=True):
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우삼'}); add_single_record_db(curr_date, '우삼'); st.cache_data.clear(); st.rerun()
+    with col2:
+        if st.button("우사", key="init_btn_우사", use_container_width=True):
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '우사'}); add_single_record_db(curr_date, '우사'); st.cache_data.clear(); st.rerun()
+    with col3:
+        if st.button("좌삼", key="init_btn_좌삼", use_container_width=True):
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌삼'}); add_single_record_db(curr_date, '좌삼'); st.cache_data.clear(); st.rerun()
+    with col4:
+        if st.button("좌사", key="init_btn_좌사", use_container_width=True):
+            push_backup(); st.session_state.records.append({'date': curr_date, 'result': '좌사'}); add_single_record_db(curr_date, '좌사'); st.cache_data.clear(); st.rerun()
 
 else:
     last_rec = records[-1]
@@ -465,17 +470,46 @@ else:
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
-    # 🛠️ [무한 중복 입력 완전 차단]: 1회성 일반 터치 버튼으로 변경
-    btn_cols = st.columns(4)
-    for idx, combo in enumerate(ALL_COMBOS):
-        if btn_cols[idx].button(combo, key=f"btn_input_{combo}", use_container_width=True):
+    # 🛠️ [원래 가로 4열 일렬 배치 구조 복원]
+    col1, col2, col3, col4 = st.columns(4)
+    with col1:
+        if st.button("우삼", key="btn_우삼", use_container_width=True):
             push_backup()
-            st.session_state.records.append({'date': curr_date, 'result': combo})
+            st.session_state.records.append({'date': curr_date, 'result': '우삼'})
             if len(st.session_state.records) > MAX_DATA_SIZE:
                 st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
                 sync_all_records_db(st.session_state.records)
-            else:
-                add_single_record_db(curr_date, combo)
+            else: add_single_record_db(curr_date, '우삼')
+            st.cache_data.clear()
+            st.rerun()
+    with col2:
+        if st.button("우사", key="btn_우사", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': curr_date, 'result': '우사'})
+            if len(st.session_state.records) > MAX_DATA_SIZE:
+                st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+                sync_all_records_db(st.session_state.records)
+            else: add_single_record_db(curr_date, '우사')
+            st.cache_data.clear()
+            st.rerun()
+    with col3:
+        if st.button("좌삼", key="btn_좌삼", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': curr_date, 'result': '좌삼'})
+            if len(st.session_state.records) > MAX_DATA_SIZE:
+                st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+                sync_all_records_db(st.session_state.records)
+            else: add_single_record_db(curr_date, '좌삼')
+            st.cache_data.clear()
+            st.rerun()
+    with col4:
+        if st.button("좌사", key="btn_좌사", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': curr_date, 'result': '좌사'})
+            if len(st.session_state.records) > MAX_DATA_SIZE:
+                st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+                sync_all_records_db(st.session_state.records)
+            else: add_single_record_db(curr_date, '좌사')
             st.cache_data.clear()
             st.rerun()
 
