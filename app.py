@@ -29,7 +29,7 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    /* 원래 쓰던 가로 4열 고정 버튼 스타일 */
+    /* 가로 4열 고정 버튼 스타일 */
     div[data-testid="stHorizontalBlock"] {
         display: flex !important;
         flex-direction: row !important;
@@ -342,8 +342,8 @@ def calculate_stats(records_tuple, target_date=None):
     }
     return stats, history_picks
 
-if "records" not in st.session_state:
-    st.session_state.records = load_data()
+# 🛠️ 앱 실행 시 DB 데이터를 무조건 로드하여 세션에 보존
+st.session_state.records = load_data()
 
 if "history_stack" not in st.session_state: st.session_state.history_stack = []
 if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
@@ -356,6 +356,7 @@ records = st.session_state.records
 records_tuple = tuple((r['date'], r['result']) for r in records)
 curr_date = get_today_str()
 
+# 오늘 입력된 데이터 수 카운트 (자정 지나면 오늘 날짜 데이터가 없으므로 0부터 시작)
 today_records_count = sum(1 for r in records if r['date'] == curr_date)
 next_round_num = today_records_count + 1
 
