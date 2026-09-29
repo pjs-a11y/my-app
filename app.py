@@ -29,16 +29,24 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
-    div[data-testid="stSegmentedControl"] { width: 100% !important; }
-    div[data-testid="stSegmentedControl"] > div {
-        display: flex !important; flex-direction: row !important;
-        width: 100% !important; gap: 2px !important;
+    /* 결과 선택 전용 4열 버튼 스타일 */
+    .input-grid {
+        display: flex !important;
+        flex-direction: row !important;
+        gap: 4px !important;
+        width: 100% !important;
+        margin-bottom: 0.5rem !important;
     }
-    div[data-testid="stSegmentedControl"] button {
-        flex: 1 1 25% !important; width: 25% !important;
-        max-width: 25% !important; min-width: 0px !important;
-        padding: 0.3rem 0rem !important; font-size: 0.85rem !important;
-        font-weight: bold !important; height: 38px !important;
+    .input-grid .stButton {
+        flex: 1 1 25% !important;
+        width: 25% !important;
+    }
+    .input-grid .stButton > button {
+        width: 100% !important;
+        height: 45px !important;
+        font-size: 0.95rem !important;
+        font-weight: bold !important;
+        padding: 0 !important;
         touch-action: manipulation !important;
         -webkit-tap-highlight-color: transparent !important;
     }
@@ -353,7 +361,6 @@ records = st.session_state.records
 records_tuple = tuple((r['date'], r['result']) for r in records)
 curr_date = get_today_str()
 
-# 🛠️ 오늘 날짜 데이터만 카운트하여 매일 자정 1회부터 시작하는 순차 회차 산출
 today_records_count = sum(1 for r in records if r['date'] == curr_date)
 next_round_num = today_records_count + 1
 
@@ -381,13 +388,14 @@ if st.session_state.show_bulk:
 
 elif not records:
     st.markdown("**⚙️ 최초 환경 설정**")
-    sel = st.segmented_control(label="첫 결과 선택", options=ALL_COMBOS, selection_mode="single", label_visibility="collapsed", key="init_seg_ctrl")
-    if sel:
-        push_backup()
-        st.session_state.records.append({'date': curr_date, 'result': sel})
-        add_single_record_db(curr_date, sel)
-        st.cache_data.clear()
-        st.rerun()
+    cols = st.columns(4)
+    for idx, combo in enumerate(ALL_COMBOS):
+        if cols[idx].button(combo, key=f"init_btn_{combo}", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': curr_date, 'result': combo})
+            add_single_record_db(curr_date, combo)
+            st.cache_data.clear()
+            st.rerun()
 
 else:
     last_rec = records[-1]
@@ -457,23 +465,19 @@ else:
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
-    input_val = st.segmented_control(
-        label="결과 선택",
-        options=ALL_COMBOS,
-        selection_mode="single",
-        label_visibility="collapsed",
-        key=f"seg_ctrl_{len(records)}"
-    )
-
-    if input_val:
-        push_backup()
-        st.session_state.records.append({'date': curr_date, 'result': input_val})
-        if len(st.session_state.records) > MAX_DATA_SIZE:
-            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            sync_all_records_db(st.session_state.records)
-        else: add_single_record_db(curr_date, input_val)
-        st.cache_data.clear()
-        st.rerun()
+    # 🛠️ [무한 중복 입력 완전 차단]: 1회성 일반 터치 버튼으로 변경
+    btn_cols = st.columns(4)
+    for idx, combo in enumerate(ALL_COMBOS):
+        if btn_cols[idx].button(combo, key=f"btn_input_{combo}", use_container_width=True):
+            push_backup()
+            st.session_state.records.append({'date': curr_date, 'result': combo})
+            if len(st.session_state.records) > MAX_DATA_SIZE:
+                st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
+                sync_all_records_db(st.session_state.records)
+            else:
+                add_single_record_db(curr_date, combo)
+            st.cache_data.clear()
+            st.rerun()
 
     st.markdown("---")
 
@@ -525,7 +529,6 @@ else:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
         
-        # 오늘 날짜 기준 순번(1회, 2회...) 매핑
         for pos, i in enumerate(reversed(today_indices)):
             if i < 3: continue
             res_prev = history_picks.get(i)
