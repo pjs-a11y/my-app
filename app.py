@@ -29,6 +29,26 @@ st.markdown("""
     h1, h2, h3 { display: none !important; }
     p, div, span { font-size: 0.8rem !important; line-height: 1.3 !important; }
 
+    /* 원래 쓰던 가로 4열 고정 버튼 스타일 */
+    div[data-testid="stHorizontalBlock"] {
+        display: flex !important;
+        flex-direction: row !important;
+        flex-wrap: nowrap !important;
+        width: 100% !important;
+        gap: 2px !important;
+    }
+    div[data-testid="stHorizontalBlock"] > div {
+        flex: 1 1 25% !important;
+        width: 25% !important;
+        min-width: 0px !important;
+    }
+    div[data-testid="stHorizontalBlock"] button {
+        width: 100% !important;
+        padding: 0.4rem 0rem !important;
+        font-size: 0.85rem !important;
+        font-weight: bold !important;
+    }
+
     .ctrl-container .stButton { width: 100% !important; margin-bottom: 0.2rem !important; }
     .ctrl-container .stButton>button {
         padding: 0.5rem 0.1rem !important; font-size: 0.88rem !important;
@@ -445,7 +465,7 @@ else:
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round_num}회차 )**")
 
-    # 기본 가로 4열 배치
+    # 가로 4열 배치
     col1, col2, col3, col4 = st.columns(4)
     with col1:
         if st.button("우삼", key="btn_우삼", use_container_width=True):
