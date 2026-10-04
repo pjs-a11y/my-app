@@ -406,16 +406,14 @@ else:
     real_date_str, real_round_num = get_current_realtime_round()
     last_rec = records[-1]
     
-    col_info, col_sync = st.columns([2, 1])
-    with col_info:
-        st.markdown(f"**현재 실제 시각: {real_date_str} / {real_round_num}회차 진행 중**")
-        st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
+    # 🛠️ [현재 회차로 점프 버튼 위치 조정]: 텍스트 아래 독립된 행에 단독 배치하여 시가성 확보
+    st.markdown(f"**현재 실제 시각: {real_date_str} / {real_round_num}회차 진행 중**")
+    st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
     
-    with col_sync:
-        if st.button("⏰ 현재 회차로 점프", use_container_width=True):
-            st.session_state.manual_target_round = real_round_num
-            st.toast(f"오늘 ({real_date_str}) {real_round_num}회차로 이동했습니다!")
-            st.rerun()
+    if st.button("⏰ 현재 회차로 점프", use_container_width=True):
+        st.session_state.manual_target_round = real_round_num
+        st.toast(f"오늘 ({real_date_str}) {real_round_num}회차로 이동했습니다!")
+        st.rerun()
 
     if st.session_state.manual_target_round is not None:
         next_round = st.session_state.manual_target_round
