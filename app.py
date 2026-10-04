@@ -139,81 +139,78 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1: 장줄 vs 퐁당 패턴 분석]
-def analyze_engine1_axis(stream, val1, val2):
+# 🎯 [엔진 1: 줄 전용 분석 연산]
+def analyze_streak_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
-    if n < 2: return val1, 70
+    if n < 2: return val1, 70, '기본'
 
     last, prev = stream[-1], stream[-2]
 
-    if n >= 3 and prev != last and stream[-3] != prev:
-        # 퐁당 패턴 ➔ 퐁당 유지 (직전과 반대)
-        return OPPOSITE_SINGLE_MAP[last], 88
-    elif last == prev:
-        # 줄 패턴 ➔ 줄 유지 (직전과 동일)
-        return last, 85
+    if prev_failed:
+        if last == prev:
+            return last, 90, '줄엔진(강한줄유지)'
+        else:
+            return last, 85, '줄엔진(2타인정)'
     else:
-        # 기본 흐름
-        return last, 78
+        if last == prev:
+            return last, 88, '줄엔진(줄유지)'
+        else:
+            return last, 80, '줄엔진(기본줄)'
 
 def get_engine1_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '좌사', '좌'
 
-    s_pick, s_w = analyze_engine1_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
-    l_pick, l_w = analyze_engine1_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
-    o_pick, o_w = analyze_engine1_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
+    s_pick, s_w, _ = analyze_streak_axis([ITEM_MAP[r][0] for r in valid], '우', '좌', prev_failures['start'])
+    l_pick, l_w, _ = analyze_streak_axis([ITEM_MAP[r][1] for r in valid], '삼', '사', prev_failures['line'])
+    o_pick, o_w, _ = analyze_streak_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝', prev_failures['oe'])
 
-    axes = sorted([('start', s_pick, s_w), ('line', l_pick, l_w), ('oe', o_pick, o_w)], key=lambda x: x[1], reverse=True)
-    
-    # 예측된 조합 생성
-    rec_combo = f"{s_pick}{l_pick}"
-    if rec_combo not in ALL_COMBOS:
-        if s_pick == '우': rec_combo = '우사' if o_pick == '짝' else '우삼'
-        else: rec_combo = '좌사' if o_pick == '홀' else '좌삼'
+    axes = sorted([('start', s_pick, s_w), ('line', l_pick, l_w), ('oe', o_pick, o_w)], key=lambda x: x[2], reverse=True)
+    top_keys = {axes[0][0], axes[1][0]}
 
-    # 절대 나오지 않을 조합(지울픽) = 예측 조합의 완전 반대
+    if 'start' in top_keys and 'line' in top_keys: rec_combo = [c for c in ALL_COMBOS if c.startswith(f"{s_pick}{l_pick}")][0]
+    elif 'start' in top_keys and 'oe' in top_keys: rec_combo = f"{s_pick}{'사' if (s_pick=='우' and o_pick=='짝') or (s_pick=='좌' and o_pick=='홀') else '삼'}"
+    else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
+
+    # 줄 흐름 유지 시 "꺾이는 조합(완전 반대)"을 지울픽으로 지정
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    
-    # 지울 구멍 1개 = 상위 가중치 성분의 반대
     top_axis_pick = axes[0][1]
-    single_hole = OPPOSITE_SINGLE_MAP[top_axis_pick] if isinstance(top_axis_pick, str) else OPPOSITE_SINGLE_MAP[s_pick]
+    single_hole = OPPOSITE_SINGLE_MAP[top_axis_pick]
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2: 전전 회차 vs 전회차 변화율 분석]
-def analyze_engine2_axis(stream, val1, val2):
-    n = len(stream)
-    if n < 2: return val1, 70
-
-    last, prev = stream[-1], stream[-2]
-
-    if prev == last:
-        # 전전회차 == 전회차 (같음) ➔ 이번회차도 같은값 예측
-        return last, 85
-    else:
-        # 전전회차 != 전회차 (다름) ➔ 이번회차도 다른값(반대) 예측
-        return OPPOSITE_SINGLE_MAP[last], 85
-
+# 🎯 [엔진 2: 퐁당/교차 전용 분석 연산]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     n = len(valid)
-    if n < 3: return '우삼', '기본', '우'
+    if n < 4: return '우삼', '기본', '우'
 
-    s_pick, _ = analyze_engine2_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
-    l_pick, _ = analyze_engine2_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
-    o_pick, _ = analyze_engine2_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
+    last = valid[-1]
 
-    rec_combo = f"{s_pick}{l_pick}"
-    if rec_combo not in ALL_COMBOS:
-        if s_pick == '우': rec_combo = '우사' if o_pick == '짝' else '우삼'
-        else: rec_combo = '좌사' if o_pick == '홀' else '좌삼'
+    # 1. 특수 데칼 (대칭 교차 감지)
+    for span in [3, 2, 1]:
+        if n >= (span * 2 + 1):
+            center_idx = n - 1 - span
+            is_decal = True
+            for offset in range(1, span + 1):
+                if valid[center_idx - offset] != valid[center_idx + offset]:
+                    is_decal = False
+                    break
+            
+            if is_decal:
+                decal_target = valid[center_idx - span]
+                avoid_decal = decal_target  # 데칼이 깨지는 방향(직전 대칭 조합)을 지움
+                return avoid_decal, f'특수({span*2+1}회차데칼)', decal_target[0]
 
-    # 절대 나오지 않을 조합(지울픽) = 예측 조합의 완전 반대
-    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    single_hole = OPPOSITE_SINGLE_MAP[s_pick]
+    # 2. 직전 실패 시 퐁당 방어 (퐁당이 안 이어지고 다시 제자리로 돌아오는 조합 지움)
+    if last_e2_failed:
+        avoid = last
+        return avoid, '퐁당방어(제자리방어)', last[0]
 
-    return avoid_combo, '변화율분석', single_hole
+    # 3. 퐁당(교차) 흐름: 교차 예측 시 "교차되지 않고 직전과 똑같이 나올 조합(last)"을 지움
+    avoid = last
+    single_hole = last[0]
+    return avoid, '기본(퐁당유지)', single_hole
 
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
@@ -460,10 +457,8 @@ else:
             avoid2_ok = "성공 🎯" if prev_res and prev_res['avoid2'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
-                e1_full = f"{ITEM_FULL_MAP.get(prev_res['avoid1'], prev_res['avoid1'])}[{prev_res.get('hole1','-')}]"
-                e2_full = f"{ITEM_FULL_MAP.get(prev_res['avoid2'], prev_res['avoid2'])}[{prev_res.get('hole2','-')}]"
-                st.markdown(f"⛔ **엔진1 지울픽 : {e1_full}** ➔ {avoid1_ok}")
-                st.markdown(f"⛔ **엔진2 지울픽 : {e2_full}** ➔ {avoid2_ok}")
+                st.markdown(f"⛔ **엔진1 지울픽 ({prev_res['avoid1']}) [{prev_res.get('hole1','-')}]** ➔ {avoid1_ok}")
+                st.markdown(f"⛔ **엔진2 지울픽 ({prev_res['avoid2']}) [{prev_res.get('hole2','-')}]** ➔ {avoid2_ok}")
 
     st.markdown("---")
 
@@ -480,12 +475,8 @@ else:
     st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
-    
-    e1_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid1'], curr_res['avoid1'])}[{curr_res['hole1']}]"
-    e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
-    
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[장줄/퐁당 추적]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[전전 vs 전회차 분석]`")
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{curr_res['avoid1']}` ({ITEM_FULL_MAP[curr_res['avoid1']]}) ▶ 지울 구멍: `{curr_res['hole1']}`** `[줄엔진]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{curr_res['avoid2']}` ({ITEM_FULL_MAP[curr_res['avoid2']]}) ▶ 지울 구멍: `{curr_res['hole2']}`** `[{curr_res.get('e2_mode', '퐁당패턴')}]`")
 
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round}회차 )**")
@@ -566,7 +557,7 @@ else:
         st.toast(f"{next_round}회차 패스 등록")
         st.rerun()
 
-    if st.button("⬅ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
+    if st.button("⬅️️ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
         curr_target = next_round
         if curr_target > 1:
             st.session_state.manual_target_round = curr_target - 1
@@ -619,13 +610,10 @@ else:
             avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
             avoid2_match = "성공 🎯" if res_prev and res_prev['avoid2'] != act_item else "나와버림 ❌"
 
-            e1_str = f"{ITEM_FULL_MAP.get(res_prev['avoid1'], res_prev['avoid1'])}[{res_prev.get('hole1','-')}]" if res_prev else "-"
-            e2_str = f"{ITEM_FULL_MAP.get(res_prev['avoid2'], res_prev['avoid2'])}[{res_prev.get('hole2','-')}]" if res_prev else "-"
-
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "엔진1 지울픽": f"{e1_str} / {avoid1_match}",
-                "엔진2 지울픽": f"{e2_str} / {avoid2_match}"
+                "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} [{res_prev.get('hole1','-') if res_prev else '-'}] / {avoid1_match}",
+                "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} [{res_prev.get('hole2','-') if res_prev else '-'}] / {avoid2_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
