@@ -172,6 +172,7 @@ def get_engine1_picks(records_tuple, prev_failures):
     elif 'start' in top_keys and 'oe' in top_keys: rec_combo = f"{s_pick}{'사' if (s_pick=='우' and o_pick=='짝') or (s_pick=='좌' and o_pick=='홀') else '삼'}"
     else: rec_combo = f"{'우' if (l_pick=='사' and o_pick=='짝') or (l_pick=='삼' and o_pick=='홀') else '좌'}{l_pick}"
 
+    # 줄 흐름 유지 시 "꺾이는 조합(완전 반대)"을 지울픽으로 지정
     avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
     top_axis_pick = axes[0][1]
     single_hole = OPPOSITE_SINGLE_MAP[top_axis_pick]
@@ -186,7 +187,7 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
 
     last = valid[-1]
 
-    # 1. 특수 데칼 (퐁당/대칭 패턴 감지)
+    # 1. 특수 데칼 (대칭 교차 감지)
     for span in [3, 2, 1]:
         if n >= (span * 2 + 1):
             center_idx = n - 1 - span
@@ -198,29 +199,18 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
             
             if is_decal:
                 decal_target = valid[center_idx - span]
-                avoid_decal = f"{OPPOSITE_SINGLE_MAP[decal_target[0]]}{OPPOSITE_SINGLE_MAP[decal_target[1]]}"
-                return avoid_decal, f'특수({span*2+1}회차데칼)', OPPOSITE_SINGLE_MAP[decal_target[0]]
+                avoid_decal = decal_target  # 데칼이 깨지는 방향(직전 대칭 조합)을 지움
+                return avoid_decal, f'특수({span*2+1}회차데칼)', decal_target[0]
 
-    # 2. 직전 실패 시 퐁당 방어
+    # 2. 직전 실패 시 퐁당 방어 (퐁당이 안 이어지고 다시 제자리로 돌아오는 조합 지움)
     if last_e2_failed:
-        avoid = f"{OPPOSITE_SINGLE_MAP[last[0]]}{OPPOSITE_SINGLE_MAP[last[1]]}"
-        return avoid, '퐁당방어(강한교차)', OPPOSITE_SINGLE_MAP[last[0]]
+        avoid = last
+        return avoid, '퐁당방어(제자리방어)', last[0]
 
-    # 3. 퐁당(교차) 예측: 전전 회차 조합의 반대로 교차 진행
-    if n >= 3 and valid[-1] != valid[-2]:
-        next_pongdang = OPPOSITE_SINGLE_MAP[valid[-1][0]] + OPPOSITE_SINGLE_MAP[valid[-1][1]]
-        return next_pongdang, '기본(퐁당교차)', OPPOSITE_SINGLE_MAP[valid[-1][0]]
-
-    # 4. 기본 교차 흐름
-    s_stream = [ITEM_MAP[r][0] for r in valid]
-    l_stream = [ITEM_MAP[r][1] for r in valid]
-    
-    avoid_s = OPPOSITE_SINGLE_MAP[s_stream[-1]]
-    avoid_l = OPPOSITE_SINGLE_MAP[l_stream[-1]]
-
-    avoid = f"{avoid_s}{avoid_l}"
-    single_hole = avoid_s
-    return avoid, '기본(성분교차)', single_hole
+    # 3. 퐁당(교차) 흐름: 교차 예측 시 "교차되지 않고 직전과 똑같이 나올 조합(last)"을 지움
+    avoid = last
+    single_hole = last[0]
+    return avoid, '기본(퐁당유지)', single_hole
 
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
@@ -406,7 +396,6 @@ else:
     real_date_str, real_round_num = get_current_realtime_round()
     last_rec = records[-1]
     
-    # 🛠️ [현재 회차로 점프 버튼 위치 조정]: 텍스트 아래 독립된 행에 단독 배치하여 시가성 확보
     st.markdown(f"**현재 실제 시각: {real_date_str} / {real_round_num}회차 진행 중**")
     st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
     
@@ -568,7 +557,7 @@ else:
         st.toast(f"{next_round}회차 패스 등록")
         st.rerun()
 
-    if st.button("⬅️ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
+    if st.button("⬅️️ 직전회차로 이동", use_container_width=True, key="btn_prev_round"):
         curr_target = next_round
         if curr_target > 1:
             st.session_state.manual_target_round = curr_target - 1
