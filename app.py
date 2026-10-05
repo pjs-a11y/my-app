@@ -139,81 +139,94 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1: 장줄 vs 퐁당 패턴 분석]
-def analyze_engine1_axis(stream, val1, val2):
+# 🎯 축별 점수 산출 함수 (성분별 가중치 계산)
+def score_engine1_axis(stream, val1, val2):
     n = len(stream)
-    if n < 2: return val1, 70
-
-    last, prev = stream[-1], stream[-2]
-
-    if n >= 3 and prev != last and stream[-3] != prev:
-        # 퐁당 패턴 ➔ 퐁당 유지 (직전과 반대)
-        return OPPOSITE_SINGLE_MAP[last], 88
-    elif last == prev:
-        # 줄 패턴 ➔ 줄 유지 (직전과 동일)
-        return last, 85
-    else:
-        # 기본 흐름
-        return last, 78
-
-def get_engine1_picks(records_tuple, prev_failures):
-    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '좌사', '좌'
-
-    s_pick, s_w = analyze_engine1_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
-    l_pick, l_w = analyze_engine1_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
-    o_pick, o_w = analyze_engine1_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
-
-    axes = sorted([('start', s_pick, s_w), ('line', l_pick, l_w), ('oe', o_pick, o_w)], key=lambda x: x[1], reverse=True)
-    
-    # 예측된 조합 생성
-    rec_combo = f"{s_pick}{l_pick}"
-    if rec_combo not in ALL_COMBOS:
-        if s_pick == '우': rec_combo = '우사' if o_pick == '짝' else '우삼'
-        else: rec_combo = '좌사' if o_pick == '홀' else '좌삼'
-
-    # 절대 나오지 않을 조합(지울픽) = 예측 조합의 완전 반대
-    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    
-    # 지울 구멍 1개 = 상위 가중치 성분의 반대
-    top_axis_pick = axes[0][1]
-    single_hole = OPPOSITE_SINGLE_MAP[top_axis_pick] if isinstance(top_axis_pick, str) else OPPOSITE_SINGLE_MAP[s_pick]
-
-    return rec_combo, avoid_combo, single_hole
-
-# 🎯 [엔진 2: 전전 회차 vs 전회차 변화율 분석]
-def analyze_engine2_axis(stream, val1, val2):
-    n = len(stream)
-    if n < 2: return val1, 70
+    if n < 2: return {val1: 50, val2: 50}
 
     last, prev = stream[-1], stream[-2]
 
     if prev == last:
-        # 전전회차 == 전회차 (같음) ➔ 이번회차도 같은값 예측
-        return last, 85
+        # 전전 == 전 ➔ 다른 값 예측 (투박스 꺾임)
+        return {OPPOSITE_SINGLE_MAP[last]: 80, last: 20}
     else:
-        # 전전회차 != 전회차 (다름) ➔ 이번회차도 다른값(반대) 예측
-        return OPPOSITE_SINGLE_MAP[last], 85
+        # 전전 != 전 ➔ 같은 값 예측
+        return {last: 80, OPPOSITE_SINGLE_MAP[last]: 20}
 
+def score_engine2_axis(stream, val1, val2):
+    n = len(stream)
+    if n < 2: return {val1: 50, val2: 50}
+
+    last, prev = stream[-1], stream[-2]
+
+    if prev == last:
+        # 전전 == 전 ➔ 같은 값 예측 (유지)
+        return {last: 80, OPPOSITE_SINGLE_MAP[last]: 20}
+    else:
+        # 전전 != 전 ➔ 다른 값 예측 (변화)
+        return {OPPOSITE_SINGLE_MAP[last]: 80, last: 20}
+
+# 🎯 [엔진 1: 4순위(최저 확률) 조합 선별]
+def get_engine1_picks(records_tuple, prev_failures):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if len(valid) < 3: return '우삼', '좌사', '좌'
+
+    s_scores = score_engine1_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
+    l_scores = score_engine1_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
+    o_scores = score_engine1_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
+
+    # 4가지 조합별 점수 계산
+    combo_scores = {
+        '우삼': s_scores.get('우',0) + l_scores.get('삼',0) + o_scores.get('홀',0),
+        '우사': s_scores.get('우',0) + l_scores.get('사',0) + o_scores.get('짝',0),
+        '좌삼': s_scores.get('좌',0) + l_scores.get('삼',0) + o_scores.get('짝',0),
+        '좌사': s_scores.get('좌',0) + l_scores.get('사',0) + o_scores.get('홀',0)
+    }
+
+    # 점수 기준 정렬
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    rec_combo = sorted_combos[0][0]   # 1순위 (추천)
+    avoid_combo = sorted_combos[-1][0] # 4순위 (절대 안 나올 조합 = 지울픽)
+
+    # 4순위 조합을 구성하는 성분 중 가장 점수가 낮았던 성분을 구멍으로 지정
+    avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
+    element_scores = [
+        (avoid_s, s_scores.get(avoid_s, 0)),
+        (avoid_l, l_scores.get(avoid_l, 0)),
+        (avoid_o, o_scores.get(avoid_o, 0))
+    ]
+    single_hole = sorted(element_scores, key=lambda x: x[1])[0][0]
+
+    return rec_combo, avoid_combo, single_hole
+
+# 🎯 [엔진 2: 4순위(최저 확률) 조합 선별]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    n = len(valid)
-    if n < 3: return '우삼', '기본', '우'
+    if len(valid) < 3: return '우삼', '기본', '우'
 
-    s_pick, _ = analyze_engine2_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
-    l_pick, _ = analyze_engine2_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
-    o_pick, _ = analyze_engine2_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
+    s_scores = score_engine2_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
+    l_scores = score_engine2_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
+    o_scores = score_engine2_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
-    rec_combo = f"{s_pick}{l_pick}"
-    if rec_combo not in ALL_COMBOS:
-        if s_pick == '우': rec_combo = '우사' if o_pick == '짝' else '우삼'
-        else: rec_combo = '좌사' if o_pick == '홀' else '좌삼'
+    combo_scores = {
+        '우삼': s_scores.get('우',0) + l_scores.get('삼',0) + o_scores.get('홀',0),
+        '우사': s_scores.get('우',0) + l_scores.get('사',0) + o_scores.get('짝',0),
+        '좌삼': s_scores.get('좌',0) + l_scores.get('삼',0) + o_scores.get('짝',0),
+        '좌사': s_scores.get('좌',0) + l_scores.get('사',0) + o_scores.get('홀',0)
+    }
 
-    # 절대 나오지 않을 조합(지울픽) = 예측 조합의 완전 반대
-    avoid_combo = f"{OPPOSITE_SINGLE_MAP[rec_combo[0]]}{OPPOSITE_SINGLE_MAP[rec_combo[1]]}"
-    single_hole = OPPOSITE_SINGLE_MAP[s_pick]
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    avoid_combo = sorted_combos[-1][0] # 4순위 (지울픽)
 
-    return avoid_combo, '변화율분석', single_hole
+    avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
+    element_scores = [
+        (avoid_s, s_scores.get(avoid_s, 0)),
+        (avoid_l, l_scores.get(avoid_l, 0)),
+        (avoid_o, o_scores.get(avoid_o, 0))
+    ]
+    single_hole = sorted(element_scores, key=lambda x: x[1])[0][0]
+
+    return avoid_combo, '4순위선별', single_hole
 
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
@@ -484,8 +497,8 @@ else:
     e1_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid1'], curr_res['avoid1'])}[{curr_res['hole1']}]"
     e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
     
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[장줄/퐁당 추적]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[전전 vs 전회차 분석]`")
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[투박스/꺾임 규칙]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[연속성/유지 규칙]`")
 
     st.markdown("---")
     st.markdown(f"**결과 입력 ( {next_round}회차 )**")
