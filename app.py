@@ -139,7 +139,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [보완] 축별 점수 산출 - 초기값 기본 대응 포함
+# 🎯 축별 점수 산출 함수 (장줄 전용)
 def score_engine1_axis(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50, val2: 50}
@@ -151,6 +151,7 @@ def score_engine1_axis(stream, val1, val2):
     else:
         return {last: 70, OPPOSITE_SINGLE_MAP[last]: 30}
 
+# 🎯 축별 점수 산출 함수 (퐁당 전용)
 def score_engine2_axis(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50, val2: 50}
@@ -162,7 +163,7 @@ def score_engine2_axis(stream, val1, val2):
     else:
         return {OPPOSITE_SINGLE_MAP[last]: 70, last: 30}
 
-# 🎯 [보완] 동점 처리 가중치 보정 및 안전한 4순위 선별
+# 🎯 [엔진 1: 장줄 기준 4순위 지울픽]
 def get_engine1_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 2: return '우삼', '좌사', '좌'
@@ -192,6 +193,7 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
+# 🎯 [엔진 2: 퐁당 기준 4순위 지울픽]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 2: return '우삼', '기본', '우'
@@ -339,110 +341,4 @@ if "records" not in st.session_state:
     st.session_state.records = load_data()
 
 if "history_store" not in st.session_state:
-    st.session_state.history_store = {}
-
-if "history_stack" not in st.session_state: st.session_state.history_stack = []
-if "show_bulk" not in st.session_state: st.session_state.show_bulk = False
-
-if "manual_target_round" not in st.session_state:
-    st.session_state.manual_target_round = None
-
-def push_backup():
-    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
-    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
-
-records = st.session_state.records
-records_tuple = tuple((r['date'], r['round'], r['result']) for r in records)
-
-if st.session_state.show_bulk:
-    st.markdown("**📋 과거 데이터 한 번에 복사/붙여넣기**")
-    b_date = st.date_input("입력할 날짜 선택", datetime.now())
-    b_start_rd = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
-    raw_text = st.text_area("텍스트 붙여넣기", height=180, placeholder="예시:\n우사 우삼 좌사 좌삼 우사")
-    col_b1, col_b2 = st.columns(2)
-    if col_b1.button("📥 데이터 일괄 추가", use_container_width=True):
-        found_items = re.findall(r'우사|우삼|좌사|좌삼', raw_text)
-        if found_items:
-            push_backup()
-            curr_rd, curr_dt = int(b_start_rd), b_date
-            for item in found_items:
-                st.session_state.records.append({'date': curr_dt.strftime("%Y-%m-%d"), 'round': curr_rd, 'result': item})
-                curr_rd += 1
-                if curr_rd > 288:
-                    curr_rd = 1
-                    curr_dt = curr_dt + timedelta(days=1)
-            st.session_state.records = st.session_state.records[-MAX_DATA_SIZE:]
-            sync_all_records_db(st.session_state.records)
-            st.toast(f"총 {len(found_items)}개 일괄 등록 완료!")
-            st.session_state.show_bulk = False
-            st.session_state.manual_target_round = None
-            st.rerun()
-    if col_b2.button("❌ 취소", use_container_width=True):
-        st.session_state.show_bulk = False
-        st.rerun()
-
-elif not records:
-    st.markdown("**⚙️ 최초 환경 설정**")
-    init_date = st.date_input("날짜 선택", datetime.now())
-    init_round = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
-    col1, col2, col3, col4 = st.columns(4)
-    dt_s, rd_n = init_date.strftime("%Y-%m-%d"), int(init_round)
-    with col1:
-        if st.button("우삼", key="init_btn_우삼", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': dt_s, 'round': rd_n, 'result': '우삼'}); add_single_record_db(dt_s, rd_n, '우삼'); st.rerun()
-    with col2:
-        if st.button("우사", key="init_btn_우사", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': dt_s, 'round': rd_n, 'result': '우사'}); add_single_record_db(dt_s, rd_n, '우사'); st.rerun()
-    with col3:
-        if st.button("좌삼", key="init_btn_좌삼", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': dt_s, 'round': rd_n, 'result': '좌삼'}); add_single_record_db(dt_s, rd_n, '좌삼'); st.rerun()
-    with col4:
-        if st.button("좌사", key="init_btn_좌사", use_container_width=True):
-            push_backup(); st.session_state.records.append({'date': dt_s, 'round': rd_n, 'result': '좌사'}); add_single_record_db(dt_s, rd_n, '좌사'); st.rerun()
-
-else:
-    real_date_str, real_round_num = get_current_realtime_round()
-    last_rec = records[-1]
-    
-    st.markdown(f"**현재 실제 시각: {real_date_str} / {real_round_num}회차 진행 중**")
-    st.markdown(f"**DB 마지막 입력: {last_rec['date']} / {last_rec['round']}회차**")
-    
-    if st.button("⏰ 현재 회차로 점프", use_container_width=True):
-        st.session_state.manual_target_round = real_round_num
-        st.toast(f"오늘 ({real_date_str}) {real_round_num}회차로 이동했습니다!")
-        st.rerun()
-
-    if st.session_state.manual_target_round is not None:
-        next_round = st.session_state.manual_target_round
-        curr_date = real_date_str
-    else:
-        if last_rec['round'] >= 288:
-            next_round = 1
-            curr_date = (datetime.strptime(last_rec['date'], "%Y-%m-%d") + timedelta(days=1)).strftime("%Y-%m-%d")
-        else:
-            next_round = last_rec['round'] + 1
-            curr_date = last_rec['date']
-
-    if st.button("📋 텍스트 대량 추가", use_container_width=True):
-        st.session_state.show_bulk = True
-        st.rerun()
-
-    st.markdown("---")
-
-    recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.history_store)
-    recent_cnt = len(records)
-    st.markdown(f"**누적 2중 지울픽 성적 (최근 {recent_cnt}개 기준)**")
-    if recent_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 (성공률 {recent_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 (성공률 {recent_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"🔥 **더블 일치 시 성공률 : {recent_stat['double_win']}승 {recent_stat['double_lose']}패 (성공률 {recent_stat['double_rate']:.1f}%)**")
-
-    st.markdown("---")
-
-    try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
-    except Exception: w_str = ""
-    today_stat, _ = calculate_stats(records_tuple, st.session_state.history_store, target_date=curr_date)
-    st.markdown(f"**오늘 누적 2중 지울픽 성적 ({curr_date} {w_str})**")
-    if today_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 :
+    st.session_state.history_store
