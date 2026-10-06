@@ -139,7 +139,7 @@ def delete_last_record_db():
                 supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
         except Exception: pass
 
-# 🎯 [엔진 1: 장줄 전용 축별 점수 산출 함수]
+# 🎯 [보완] 축별 점수 산출 - 초기값 기본 대응 포함
 def score_engine1_axis(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50, val2: 50}
@@ -147,13 +147,10 @@ def score_engine1_axis(stream, val1, val2):
     last, prev = stream[-1], stream[-2]
 
     if last == prev:
-        # 장줄 흐름 (같음) ➔ 직전값 유지에 높은 가중치 부여
         return {last: 90, OPPOSITE_SINGLE_MAP[last]: 10}
     else:
-        # 줄이 끊긴 상태 ➔ 기본 연속성 타겟
         return {last: 70, OPPOSITE_SINGLE_MAP[last]: 30}
 
-# 🎯 [엔진 2: 퐁당 전용 축별 점수 산출 함수]
 def score_engine2_axis(stream, val1, val2):
     n = len(stream)
     if n < 2: return {val1: 50, val2: 50}
@@ -161,66 +158,63 @@ def score_engine2_axis(stream, val1, val2):
     last, prev = stream[-1], stream[-2]
 
     if last != prev:
-        # 퐁당 흐름 (달라짐) ➔ 직전값의 반대값(교차)에 높은 가중치 부여
         return {OPPOSITE_SINGLE_MAP[last]: 90, last: 10}
     else:
-        # 줄이 서 있는 상태 ➔ 교차 시도 점수 부여
         return {OPPOSITE_SINGLE_MAP[last]: 70, last: 30}
 
-# 🎯 [엔진 1: 장줄 기준 4순위(최저 확률) 지울픽 산출]
+# 🎯 [보완] 동점 처리 가중치 보정 및 안전한 4순위 선별
 def get_engine1_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '좌사', '좌'
+    if len(valid) < 2: return '우삼', '좌사', '좌'
 
     s_scores = score_engine1_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_scores = score_engine1_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
     o_scores = score_engine1_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
     combo_scores = {
-        '우삼': s_scores.get('우',0) + l_scores.get('삼',0) + o_scores.get('홀',0),
-        '우사': s_scores.get('우',0) + l_scores.get('사',0) + o_scores.get('짝',0),
-        '좌삼': s_scores.get('좌',0) + l_scores.get('삼',0) + o_scores.get('짝',0),
-        '좌사': s_scores.get('좌',0) + l_scores.get('사',0) + o_scores.get('홀',0)
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
     }
 
     sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
-    rec_combo = sorted_combos[0][0]   # 1순위 (추천)
-    avoid_combo = sorted_combos[-1][0] # 4순위 (장줄 기준 가장 안 나올 지울픽)
+    rec_combo = sorted_combos[0][0]
+    avoid_combo = sorted_combos[-1][0]
 
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
-        (avoid_s, s_scores.get(avoid_s, 0)),
-        (avoid_l, l_scores.get(avoid_l, 0)),
-        (avoid_o, o_scores.get(avoid_o, 0))
+        (avoid_s, s_scores.get(avoid_s, 50)),
+        (avoid_l, l_scores.get(avoid_l, 50)),
+        (avoid_o, o_scores.get(avoid_o, 50))
     ]
     single_hole = sorted(element_scores, key=lambda x: x[1])[0][0]
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2: 퐁당 기준 4순위(최저 확률) 지울픽 산출]
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '기본', '우'
+    if len(valid) < 2: return '우삼', '기본', '우'
 
     s_scores = score_engine2_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_scores = score_engine2_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
     o_scores = score_engine2_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
     combo_scores = {
-        '우삼': s_scores.get('우',0) + l_scores.get('삼',0) + o_scores.get('홀',0),
-        '우사': s_scores.get('우',0) + l_scores.get('사',0) + o_scores.get('짝',0),
-        '좌삼': s_scores.get('좌',0) + l_scores.get('삼',0) + o_scores.get('짝',0),
-        '좌사': s_scores.get('좌',0) + l_scores.get('사',0) + o_scores.get('홀',0)
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
     }
 
     sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
-    avoid_combo = sorted_combos[-1][0] # 4순위 (퐁당 기준 가장 안 나올 지울픽)
+    avoid_combo = sorted_combos[-1][0]
 
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
-        (avoid_s, s_scores.get(avoid_s, 0)),
-        (avoid_l, l_scores.get(avoid_l, 0)),
-        (avoid_o, o_scores.get(avoid_o, 0))
+        (avoid_s, s_scores.get(avoid_s, 50)),
+        (avoid_l, l_scores.get(avoid_l, 50)),
+        (avoid_o, o_scores.get(avoid_o, 50))
     ]
     single_hole = sorted(element_scores, key=lambda x: x[1])[0][0]
 
@@ -229,7 +223,7 @@ def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
 # 🎯 [통합 메인 연산]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3:
+    if len(valid) < 2:
         return {
             'rec1': '우삼', 'avoid1': '좌사', 'hole1': '좌',
             'avoid2': '우삼', 'hole2': '삼', 'e2_mode': '기본',
@@ -239,7 +233,7 @@ def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'l
     rec1, avoid1, hole1 = get_engine1_picks(records_tuple, prev_failures)
     avoid2, e2_mode, hole2 = get_engine2_avoid_pattern(records_tuple, last_e2_failed)
 
-    pattern_display = " ➔ ".join(valid[-4:])
+    pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
     if last_avoid_failed:
         bet_guide = "⛔ 패스 권장 (직전 지울픽 실패 - 변칙 구간 방어)"
@@ -261,7 +255,7 @@ def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'l
 
 def calculate_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
-    if n < 4: return None, {}
+    if n < 3: return None, {}
 
     tot = 0
     avoid1_win, avoid2_win = 0, 0
@@ -277,7 +271,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     last_e2_failed = False
     history_picks = {}
 
-    for i in range(3, n):
+    for i in range(2, n):
         act = records_tuple[i][2]
         rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
@@ -451,7 +445,4 @@ else:
     st.markdown(f"**오늘 누적 2중 지울픽 성적 ({curr_date} {w_str})**")
     if today_stat:
         st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 (성공률 {today_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승 {today_stat['double_lose']}패 (성공률 {today_stat['double_rate']:.1f}%)**")
-        st.markdown(f"🛡️ **엔진1 최다 성적 : 연속 성공 {today_stat['max_e1_win_streak']}회 / 연속 실패 {today_stat['max_e1_lose_streak']}회**")
-        st.markdown(f"🛡️ **엔진2 최
+        st.markdown(f"⛔ **엔진2 지울픽 성공률 :
