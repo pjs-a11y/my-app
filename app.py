@@ -103,10 +103,61 @@ def get_current_realtime_round():
         current_round = 288
     return now.strftime("%Y-%m-%d"), current_round
 
+# 🛠️ [수정 완료] 문법 에러 원인 해결
 def load_data():
-    if not supabase: return []
+    if not supabase: 
+        return []
     try:
         res = supabase.table("ladder_records").select("date, round, result, id").order("id", desc=True).limit(MAX_DATA_SIZE).execute()
         if res and res.data:
             sorted_records = sorted(res.data, key=lambda x: int(x['id']))
-            return [{'date': str(r['date']).strip(), 'round': int(r['round']),
+            return [
+                {
+                    'date': str(r['date']).strip(),
+                    'round': int(r['round']),
+                    'result': str(r['result']).strip()
+                }
+                for r in sorted_records
+            ]
+        return []
+    except Exception: 
+        return []
+
+def sync_all_records_db(records):
+    if not supabase: return
+    try:
+        trimmed_records = records[-MAX_DATA_SIZE:] if records else []
+        fetch_ids = supabase.table("ladder_records").select("id").execute()
+        if fetch_ids and fetch_ids.data:
+            id_list = [r['id'] for r in fetch_ids.data]
+            for i in range(0, len(id_list), 200):
+                supabase.table("ladder_records").delete().in_("id", id_list[i:i + 200]).execute()
+
+        if trimmed_records:
+            bulk_list = [{"date": str(r['date']).strip(), "round": int(r['round']), "result": str(r['result']).strip()} for r in trimmed_records]
+            for i in range(0, len(bulk_list), 100):
+                supabase.table("ladder_records").insert(bulk_list[i:i + 100]).execute()
+    except Exception: pass
+
+def add_single_record_db(date_str, round_num, result_str):
+    if supabase:
+        try:
+            supabase.table("ladder_records").insert({"date": str(date_str), "round": int(round_num), "result": str(result_str)}).execute()
+        except Exception: pass
+
+def delete_last_record_db():
+    if supabase:
+        try:
+            res = supabase.table("ladder_records").select("id").order("id", desc=True).limit(1).execute()
+            if res and res.data:
+                supabase.table("ladder_records").delete().eq("id", res.data[0]['id']).execute()
+        except Exception: pass
+
+def push_backup():
+    st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
+    if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
+
+# 🎯 축별 점수 산출
+def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
+    n = len(stream)
+    if
