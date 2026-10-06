@@ -65,6 +65,18 @@ st.markdown("""
 </style>
 """, unsafe_allow_html=True)
 
+# 🛠️ [세션 상태 최우선 안전 초기화]
+if "records" not in st.session_state:
+    st.session_state.records = []
+if "history_store" not in st.session_state:
+    st.session_state.history_store = {}
+if "history_stack" not in st.session_state:
+    st.session_state.history_stack = []
+if "show_bulk" not in st.session_state:
+    st.session_state.show_bulk = False
+if "manual_target_round" not in st.session_state:
+    st.session_state.manual_target_round = None
+
 MAX_DATA_SIZE = 500
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
@@ -278,7 +290,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         rd_key = f"{records_tuple[i][0]}_{records_tuple[i][1]}"
         past_sub = records_tuple[:i]
 
-        if rd_key in history_store:
+        if history_store and rd_key in history_store:
             res = history_store[rd_key]
         else:
             res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
@@ -337,8 +349,21 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     }
     return stats, history_picks
 
-if "records" not in st.session_state:
+# 🛠️ 데이터 초기 로드
+if not st.session_state.records:
     st.session_state.records = load_data()
 
-if "history_store" not in st.session_state:
-    st.session_state.history_store
+records = st.session_state.records
+records_tuple = tuple((r['date'], r['round'], r['result']) for r in records)
+
+if st.session_state.show_bulk:
+    st.markdown("**📋 과거 데이터 한 번에 복사/붙여넣기**")
+    b_date = st.date_input("입력할 날짜 선택", datetime.now())
+    b_start_rd = st.number_input("시작 회차 번호", min_value=1, max_value=288, value=1)
+    raw_text = st.text_area("텍스트 붙여넣기", height=180, placeholder="예시:\n우사 우삼 좌사 좌삼 우사")
+    col_b1, col_b2 = st.columns(2)
+    if col_b1.button("📥 데이터 일괄 추가", use_container_width=True):
+        found_items = re.findall(r'우사|우삼|좌사|좌삼', raw_text)
+        if found_items:
+            push_backup()
+            curr_rd
