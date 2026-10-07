@@ -197,7 +197,7 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
     rec_combo = sorted_combos[0][0]
-    avoid_combo = sorted_combos[-1][0]
+    avoid_combo = sorted_combos[-1][0]  # 4순위 지울픽
 
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
@@ -209,53 +209,23 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 패턴/데칼 점수합산 최저 4순위 지울픽
+# 🎯 [엔진 2] 최근 오랫동안 나오지 않은(미출) 조합 추천
 def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if not valid: return '좌사', '기본', '좌'
+
+    last_seen = {c: float('inf') for c in ALL_COMBOS}
     n = len(valid)
-    if n < 4: return '좌사', '기본', '좌'
 
-    for span in [3, 2, 1]:
-        if n >= (span * 2 + 1):
-            center_idx = n - 1 - span
-            is_decal = True
-            for offset in range(1, span + 1):
-                if valid[center_idx - offset] != valid[center_idx + offset]:
-                    is_decal = False
-                    break
-            
-            if is_decal:
-                decal_target = valid[center_idx - span]
-                avoid_decal = f"{OPPOSITE_SINGLE_MAP[decal_target[0]]}{OPPOSITE_SINGLE_MAP[decal_target[1]]}"
-                return avoid_decal, f'특수({span*2+1}회차데칼)', OPPOSITE_SINGLE_MAP[decal_target[0]]
+    for i, c in enumerate(reversed(valid)):
+        if last_seen[c] == float('inf'):
+            last_seen[c] = i  # 몇 회차 전에 나왔는지 기록 (0: 직전 회차)
 
-    s_stream = [ITEM_MAP[r][0] for r in valid]
-    l_stream = [ITEM_MAP[r][1] for r in valid]
-    o_stream = [ITEM_MAP[r][2] for r in valid]
+    # 미출현 기간이 가장 길었던(last_seen 값이 가장 큰) 조합 4순위 지울픽으로 선별
+    avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
+    single_hole = ITEM_MAP[avoid_combo][0]
 
-    s_scores = {s_stream[-1]: 70, OPPOSITE_SINGLE_MAP[s_stream[-1]]: 30} if s_stream[-1] == s_stream[-2] else {OPPOSITE_SINGLE_MAP[s_stream[-1]]: 70, s_stream[-1]: 30}
-    l_scores = {OPPOSITE_SINGLE_MAP[l_stream[-1]]: 70, l_stream[-1]: 30} if l_stream[-1] == l_stream[-2] else {l_stream[-1]: 70, OPPOSITE_SINGLE_MAP[l_stream[-1]]: 30}
-    o_scores = {o_stream[-1]: 60, OPPOSITE_SINGLE_MAP[o_stream[-1]]: 40}
-
-    combo_scores = {
-        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
-        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
-        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
-        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
-    }
-
-    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
-    avoid_combo = sorted_combos[-1][0]
-
-    avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
-    element_scores = [
-        (avoid_s, s_scores.get(avoid_s, 50)),
-        (avoid_l, l_scores.get(avoid_l, 50)),
-        (avoid_o, o_scores.get(avoid_o, 50))
-    ]
-    single_hole = sorted(element_scores, key=lambda x: x[1])[0][0]
-
-    return avoid_combo, '4순위패턴', single_hole
+    return avoid_combo, '최근미출추적', single_hole
 
 # 🎯 [통합 분석]
 def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
@@ -509,7 +479,7 @@ else:
     e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
     
     st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[3축 점수합산 (4순위)]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[패턴 점수합산 (4순위)]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[최근 최장 미출현 조합]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
