@@ -6,7 +6,7 @@ import streamlit as st
 from datetime import datetime, timedelta, timezone
 from supabase import create_client, Client
 
-st.set_page_config(page_title="키노사다리 2중 지울픽 분석기", page_icon="⚡", layout="centered")
+st.set_page_config(page_title="키노사다리 3중 지울픽 분석기", page_icon="⚡", layout="centered")
 
 @st.cache_resource
 def init_supabase() -> Client:
@@ -156,7 +156,6 @@ def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
-# 🎯 축별 점수 산출
 def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
     n = len(stream)
     if n < 3: return val1, 70
@@ -179,7 +178,7 @@ def score_pure_rule_axis(stream, val1, val2, prev_failed=False):
     other_val = OPPOSITE_SINGLE_MAP[pick]
     return {pick: weight, other_val: 100 - weight}
 
-# 🎯 [엔진 1] 점수합산 최저 4순위 지울픽
+# 🎯 [엔진 1] 기존 3축 점수합산 최저 4순위 지울픽
 def get_engine1_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '좌사', '좌'
@@ -197,7 +196,7 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
     rec_combo = sorted_combos[0][0]
-    avoid_combo = sorted_combos[-1][0]  # 4순위 지울픽
+    avoid_combo = sorted_combos[-1][0]
 
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
@@ -209,53 +208,76 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 최근 오랫동안 나오지 않은(미출) 조합 추천
-def get_engine2_avoid_pattern(records_tuple, last_e2_failed=False):
+# 🎯 [엔진 2] 1순위 추천 조합의 완전 반대 지울픽
+def get_engine2_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if not valid: return '좌사', '기본', '좌'
+    if len(valid) < 3: return '좌사', '좌'
+
+    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌', prev_failures['start'])
+    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사', prev_failures['line'])
+    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝', prev_failures['oe'])
+
+    combo_scores = {
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
+    }
+
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    top_combo = sorted_combos[0][0] # 1순위
+    avoid_combo = f"{OPPOSITE_SINGLE_MAP[top_combo[0]]}{OPPOSITE_SINGLE_MAP[top_combo[1]]}" # 1순위의 반대
+    single_hole = OPPOSITE_SINGLE_MAP[top_combo[0]]
+
+    return avoid_combo, single_hole
+
+# 🎯 [엔진 3] 최근 가장 오랫동안 나오지 않은(미출) 조합 지울픽
+def get_engine3_avoid_pattern(records_tuple):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if not valid: return '좌사', '좌'
 
     last_seen = {c: float('inf') for c in ALL_COMBOS}
-    n = len(valid)
-
     for i, c in enumerate(reversed(valid)):
         if last_seen[c] == float('inf'):
-            last_seen[c] = i  # 몇 회차 전에 나왔는지 기록 (0: 직전 회차)
+            last_seen[c] = i
 
-    # 미출현 기간이 가장 길었던(last_seen 값이 가장 큰) 조합 4순위 지울픽으로 선별
     avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
     single_hole = ITEM_MAP[avoid_combo][0]
 
-    return avoid_combo, '최근미출추적', single_hole
+    return avoid_combo, single_hole
 
 # 🎯 [통합 분석]
-def analyze_double_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False, last_e2_failed=False):
+def analyze_triple_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
             'rec1': '우삼', 'avoid1': '좌사', 'hole1': '좌',
-            'avoid2': '우삼', 'hole2': '삼', 'e2_mode': '기본',
+            'avoid2': '좌사', 'hole2': '좌',
+            'avoid3': '우삼', 'hole3': '삼',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
     rec1, avoid1, hole1 = get_engine1_picks(records_tuple, prev_failures)
-    avoid2, e2_mode, hole2 = get_engine2_avoid_pattern(records_tuple, last_e2_failed)
+    avoid2, hole2 = get_engine2_picks(records_tuple, prev_failures)
+    avoid3, hole3 = get_engine3_avoid_pattern(records_tuple)
 
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
     if last_avoid_failed:
         bet_guide = "⛔ 패스 권장 (직전 지울픽 실패 - 변칙 구간 방어)"
-    elif avoid1 == avoid2:
-        bet_guide = f"🔥 [더블 지울픽 일치] 지울픽: `{avoid1}` ({ITEM_FULL_MAP[avoid1]}) ➔ 3마킹 강한 배팅 (GO)"
+    elif avoid1 == avoid2 == avoid3:
+        bet_guide = f"🔥 [3개 엔진 완전일치] 지울픽: `{avoid1}` ({ITEM_FULL_MAP[avoid1]}) ➔ 강력 배팅 (GO)"
+    elif avoid1 == avoid2 or avoid1 == avoid3 or avoid2 == avoid3:
+        match_pick = avoid1 if (avoid1 == avoid2 or avoid1 == avoid3) else avoid2
+        bet_guide = f"⚡ [2개 엔진 일치] 지울픽: `{match_pick}` ({ITEM_FULL_MAP[match_pick]}) ➔ 일반 배팅 (GO)"
     else:
-        bet_guide = f"⛔ [지울픽 불일치] 엔진1:`{avoid1}` vs 엔진2:`{avoid2}` ➔ 패스 권장 (PASS)"
+        bet_guide = "⛔ [지울픽 불일치] 엔진 간 지울픽 상충 ➔ 패스 권장 (PASS)"
 
     return {
         'rec1': rec1,
-        'avoid1': avoid1,
-        'hole1': hole1,
-        'avoid2': avoid2,
-        'hole2': hole2,
-        'e2_mode': e2_mode,
+        'avoid1': avoid1, 'hole1': hole1,
+        'avoid2': avoid2, 'hole2': hole2,
+        'avoid3': avoid3, 'hole3': hole3,
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
@@ -265,17 +287,16 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     if n < 4: return None, {}
 
     tot = 0
-    avoid1_win, avoid2_win = 0, 0
-    double_match_tot, double_match_win = 0, 0
-    
+    avoid1_win, avoid2_win, avoid3_win = 0, 0, 0
     e1_win_streak, max_e1_win_streak = 0, 0
     e1_lose_streak, max_e1_lose_streak = 0, 0
     e2_win_streak, max_e2_win_streak = 0, 0
     e2_lose_streak, max_e2_lose_streak = 0, 0
+    e3_win_streak, max_e3_win_streak = 0, 0
+    e3_lose_streak, max_e3_lose_streak = 0, 0
 
     prev_failures = {'start': False, 'line': False, 'oe': False}
     last_avoid_failed = False
-    last_e2_failed = False
     history_picks = {}
 
     for i in range(3, n):
@@ -286,7 +307,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if history_store and rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_double_avoid_system(past_sub, prev_failures, last_avoid_failed, last_e2_failed)
+            res = analyze_triple_avoid_system(past_sub, prev_failures, last_avoid_failed)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
@@ -297,48 +318,42 @@ def calculate_stats(records_tuple, history_store, target_date=None):
             tot += 1
             
             if res['avoid1'] != act:
-                avoid1_win += 1
-                e1_win_streak += 1
-                e1_lose_streak = 0
+                avoid1_win += 1; e1_win_streak += 1; e1_lose_streak = 0
                 if e1_win_streak > max_e1_win_streak: max_e1_win_streak = e1_win_streak
             else:
-                e1_lose_streak += 1
-                e1_win_streak = 0
+                e1_lose_streak += 1; e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
             if res['avoid2'] != act:
-                avoid2_win += 1
-                e2_win_streak += 1
-                e2_lose_streak = 0
+                avoid2_win += 1; e2_win_streak += 1; e2_lose_streak = 0
                 if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
             else:
-                e2_lose_streak += 1
-                e2_win_streak = 0
+                e2_lose_streak += 1; e2_win_streak = 0
                 if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
-            if res['avoid1'] == res['avoid2']:
-                double_match_tot += 1
-                if res['avoid1'] != act: double_match_win += 1
+            if res['avoid3'] != act:
+                avoid3_win += 1; e3_win_streak += 1; e3_lose_streak = 0
+                if e3_win_streak > max_e3_win_streak: max_e3_win_streak = e3_win_streak
+            else:
+                e3_lose_streak += 1; e3_win_streak = 0
+                if e3_lose_streak > max_e3_lose_streak: max_e3_lose_streak = e3_lose_streak
 
         rec_s, rec_l, rec_o = ITEM_MAP[res['rec1']]
         prev_failures['start'] = (rec_s != act_s)
         prev_failures['line'] = (rec_l != act_l)
         prev_failures['oe'] = (rec_o != act_o)
-        
         last_avoid_failed = (res['avoid1'] == act)
-        last_e2_failed = (res['avoid2'] == act)
 
     stats = {
         'tot': tot,
         'avoid1_win': avoid1_win, 'avoid1_lose': tot - avoid1_win, 'avoid1_rate': (avoid1_win/tot*100.0) if tot > 0 else 0.0,
         'avoid2_win': avoid2_win, 'avoid2_lose': tot - avoid2_win, 'avoid2_rate': (avoid2_win/tot*100.0) if tot > 0 else 0.0,
-        'double_tot': double_match_tot, 'double_win': double_match_win, 'double_lose': double_match_tot - double_match_win,
-        'double_rate': (double_match_win/double_match_tot*100.0) if double_match_tot > 0 else 0.0,
+        'avoid3_win': avoid3_win, 'avoid3_lose': tot - avoid3_win, 'avoid3_rate': (avoid3_win/tot*100.0) if tot > 0 else 0.0,
         'max_e1_win_streak': max_e1_win_streak, 'max_e1_lose_streak': max_e1_lose_streak,
         'max_e2_win_streak': max_e2_win_streak, 'max_e2_lose_streak': max_e2_lose_streak,
+        'max_e3_win_streak': max_e3_win_streak, 'max_e3_lose_streak': max_e3_lose_streak,
         'prev_failures': prev_failures,
-        'last_avoid_failed': last_avoid_failed,
-        'last_e2_failed': last_e2_failed
+        'last_avoid_failed': last_avoid_failed
     }
     return stats, history_picks
 
@@ -421,24 +436,22 @@ else:
 
     recent_stat, history_picks = calculate_stats(records_tuple, st.session_state.get("history_store", {}))
     recent_cnt = len(records)
-    st.markdown(f"**누적 2중 지울픽 성적 (최근 {recent_cnt}개 기준)**")
+    st.markdown(f"**누적 3중 지울픽 성적 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 (성공률 {recent_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 (성공률 {recent_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"🔥 **더블 일치 시 성공률 : {recent_stat['double_win']}승 {recent_stat['double_lose']}패 (성공률 {recent_stat['double_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 ({recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 ({recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진3 지울픽 성공률 : {recent_stat['avoid3_win']}승 {recent_stat['avoid3_lose']}패 ({recent_stat['avoid3_rate']:.1f}%)**")
 
     st.markdown("---")
 
     try: dt_obj = datetime.strptime(curr_date, "%Y-%m-%d"); w_str = WEEKDAYS[dt_obj.weekday()]
     except Exception: w_str = ""
     today_stat, _ = calculate_stats(records_tuple, st.session_state.get("history_store", {}), target_date=curr_date)
-    st.markdown(f"**오늘 누적 2중 지울픽 성적 ({curr_date} {w_str})**")
+    st.markdown(f"**오늘 누적 3중 지울픽 성적 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"⛔ **엔진1 지울픽 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 (성공률 {today_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진2 지울픽 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 (성공률 {today_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"🔥 **오늘 더블 일치 성공률 : {today_stat['double_win']}승 {today_stat['double_lose']}패 (성공률 {today_stat['double_rate']:.1f}%)**")
-        st.markdown(f"🛡️ **엔진1 최다 성적 : 연속 성공 {today_stat['max_e1_win_streak']}회 / 연속 실패 {today_stat['max_e1_lose_streak']}회**")
-        st.markdown(f"🛡️ **엔진2 최다 성적 : 연속 성공 {today_stat['max_e2_win_streak']}회 / 연속 실패 {today_stat['max_e2_lose_streak']}회**")
+        st.markdown(f"⛔ **엔진1 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 ({today_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진2 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 ({today_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진3 성공률 : {today_stat['avoid3_win']}승 {today_stat['avoid3_lose']}패 ({today_stat['avoid3_rate']:.1f}%)**")
 
     st.markdown("---")
 
@@ -453,33 +466,37 @@ else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
             avoid1_ok = "성공 🎯" if prev_res and prev_res['avoid1'] != prev_actual else "나와버림 ❌"
             avoid2_ok = "성공 🎯" if prev_res and prev_res['avoid2'] != prev_actual else "나와버림 ❌"
+            avoid3_ok = "성공 🎯" if prev_res and prev_res['avoid3'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
                 e1_full = f"{ITEM_FULL_MAP.get(prev_res['avoid1'], prev_res['avoid1'])}[{prev_res.get('hole1','-')}]"
                 e2_full = f"{ITEM_FULL_MAP.get(prev_res['avoid2'], prev_res['avoid2'])}[{prev_res.get('hole2','-')}]"
+                e3_full = f"{ITEM_FULL_MAP.get(prev_res['avoid3'], prev_res['avoid3'])}[{prev_res.get('hole3','-')}]"
                 st.markdown(f"⛔ **엔진1 지울픽 : {e1_full}** ➔ {avoid1_ok}")
                 st.markdown(f"⛔ **엔진2 지울픽 : {e2_full}** ➔ {avoid2_ok}")
+                st.markdown(f"⛔ **엔진3 지울픽 : {e3_full}** ➔ {avoid3_ok}")
 
     st.markdown("---")
 
     p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
     l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
-    l_e2_fail = recent_stat['last_e2_failed'] if recent_stat else False
-    curr_res = analyze_double_avoid_system(records_tuple, p_fails, l_avoid_fail, l_e2_fail)
+    curr_res = analyze_triple_avoid_system(records_tuple, p_fails, l_avoid_fail)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
         st.session_state.history_store[next_rd_key] = curr_res
 
-    st.markdown(f"**이번회차 2중 지울픽 분석 ( {next_round}회차 )**")
+    st.markdown(f"**이번회차 3중 지울픽 분석 ( {next_round}회차 )**")
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
     
     e1_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid1'], curr_res['avoid1'])}[{curr_res['hole1']}]"
     e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
+    e3_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid3'], curr_res['avoid3'])}[{curr_res['hole3']}]"
     
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[3축 점수합산 (4순위)]`")
-    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[최근 최장 미출현 조합]`")
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[기존 점수합산 (4순위)]`")
+    st.markdown(f"⛔ **[엔진 2 지울픽]: `{e2_disp}`** `[1순위 완전반대]`")
+    st.markdown(f"⛔ **[엔진 3 지울픽]: `{e3_disp}`** `[최장 미출현 추적]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -554,7 +571,7 @@ else:
 
     st.markdown("---")
 
-    st.markdown("**오늘 세부 결과 (2중 지울픽 대조 리스트)**")
+    st.markdown("**오늘 세부 결과 (3중 지울픽 대조 리스트)**")
     if len(records_tuple) >= 4 and history_picks:
         rows = []
         today_indices = [idx for idx, r in enumerate(records_tuple) if r[0] == curr_date]
@@ -567,11 +584,13 @@ else:
 
             avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
             avoid2_match = "성공 🎯" if res_prev and res_prev['avoid2'] != act_item else "나와버림 ❌"
+            avoid3_match = "성공 🎯" if res_prev and res_prev['avoid3'] != act_item else "나와버림 ❌"
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "엔진1 지울픽": f"{res_prev['avoid1'] if res_prev else '-'} [{res_prev.get('hole1','-') if res_prev else '-'}] / {avoid1_match}",
-                "엔진2 지울픽": f"{res_prev['avoid2'] if res_prev else '-'} [{res_prev.get('hole2','-') if res_prev else '-'}] / {avoid2_match}"
+                "엔진1": f"{res_prev['avoid1'] if res_prev else '-'} / {avoid1_match}",
+                "엔진2": f"{res_prev['avoid2'] if res_prev else '-'} / {avoid2_match}",
+                "엔진3": f"{res_prev['avoid3'] if res_prev else '-'} / {avoid3_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
