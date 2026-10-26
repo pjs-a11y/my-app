@@ -208,7 +208,7 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽)
+# 🎯 [엔진 2] 엔진1과 동일한 분석 알고리즘 기반 최고 확률 (1순위 추천픽)
 def get_engine2_picks(records_tuple, prev_failures):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '우'
@@ -274,7 +274,7 @@ def analyze_triple_avoid_system(records_tuple, prev_failures={'start': False, 'l
     elif avoid1 == avoid3:
         bet_guide = f"🔥 [지울픽 일치] 엔진1/3:`{avoid1}` ➔ 강력 3마킹 배팅 (GO)"
     else:
-        bet_guide = f"📊 [분석 진행] 엔진1:`{avoid1}` / 엔진2(추천):`{avoid2}` / 엔진3:`{avoid3}`"
+        bet_guide = f"📊 [분석 진행] 엔진1:`{avoid1}` / 엔진2(1순위):`{avoid2}` / 엔진3:`{avoid3}`"
 
     return {
         'rec1': rec1,
@@ -328,7 +328,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e1_lose_streak += 1; e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 (1순위 추천픽): 나와야 적중
+            # 엔진 2 (1순위 추천픽): 실제로 나와야 적중
             if res['avoid2'] == act:
                 avoid2_win += 1; e2_win_streak += 1; e2_lose_streak = 0
                 if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
