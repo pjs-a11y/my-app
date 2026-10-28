@@ -156,36 +156,35 @@ def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
-def analyze_pure_rule_axis(stream, val1, val2, prev_failed=False):
+# 🎯 방어 모드 제거: 순수 3축 패턴 규칙만 적용
+def analyze_pure_rule_axis(stream, val1, val2):
     n = len(stream)
     if n < 3: return val1, 70
 
     last, prev, prev2 = stream[-1], stream[-2], stream[-3]
 
-    if prev_failed:
-        if prev2 == prev and last != prev: pick, weight = last, 90
-        elif n >= 4 and stream[-4] == prev2 and prev2 == prev and last != prev: pick, weight = OPPOSITE_SINGLE_MAP[last], 88
-        else: pick, weight = last, 75
+    if prev2 != prev and prev != last:
+        pick, weight = prev, 85
+    elif prev == last:
+        pick, weight = last, 82
     else:
-        if prev2 != prev and prev != last: pick, weight = prev, 85
-        elif prev == last: pick, weight = last, 82
-        else: pick, weight = last, 78
+        pick, weight = last, 78
 
     return pick, weight
 
-def score_pure_rule_axis(stream, val1, val2, prev_failed=False):
-    pick, weight = analyze_pure_rule_axis(stream, val1, val2, prev_failed)
+def score_pure_rule_axis(stream, val1, val2):
+    pick, weight = analyze_pure_rule_axis(stream, val1, val2)
     other_val = OPPOSITE_SINGLE_MAP[pick]
     return {pick: weight, other_val: 100 - weight}
 
 # 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽)
-def get_engine1_picks(records_tuple, prev_failures):
+def get_engine1_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '좌사', '좌'
 
-    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌', prev_failures['start'])
-    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사', prev_failures['line'])
-    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝', prev_failures['oe'])
+    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
+    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
+    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
     combo_scores = {
         '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
@@ -208,14 +207,14 @@ def get_engine1_picks(records_tuple, prev_failures):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 엔진1과 동일한 분석 알고리즘 기반 최고 확률 (1순위 추천픽)
-def get_engine2_picks(records_tuple, prev_failures):
+# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽)
+def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '우'
 
-    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌', prev_failures['start'])
-    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사', prev_failures['line'])
-    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝', prev_failures['oe'])
+    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
+    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
+    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
     combo_scores = {
         '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
@@ -253,7 +252,7 @@ def get_engine3_avoid_pattern(records_tuple):
     return avoid_combo, single_hole
 
 # 🎯 [통합 분석]
-def analyze_triple_avoid_system(records_tuple, prev_failures={'start': False, 'line': False, 'oe': False}, last_avoid_failed=False):
+def analyze_triple_avoid_system(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
@@ -263,15 +262,13 @@ def analyze_triple_avoid_system(records_tuple, prev_failures={'start': False, 'l
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
-    rec1, avoid1, hole1 = get_engine1_picks(records_tuple, prev_failures)
-    avoid2, hole2 = get_engine2_picks(records_tuple, prev_failures)
+    rec1, avoid1, hole1 = get_engine1_picks(records_tuple)
+    avoid2, hole2 = get_engine2_picks(records_tuple)
     avoid3, hole3 = get_engine3_avoid_pattern(records_tuple)
 
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
-    if last_avoid_failed:
-        bet_guide = "⛔ 패스 권장 (직전 엔진1 지울픽 실패 - 변칙 구간 방어)"
-    elif avoid1 == avoid3:
+    if avoid1 == avoid3:
         bet_guide = f"🔥 [지울픽 일치] 엔진1/3:`{avoid1}` ➔ 강력 3마킹 배팅 (GO)"
     else:
         bet_guide = f"📊 [분석 진행] 엔진1:`{avoid1}` / 엔진2(1순위):`{avoid2}` / 엔진3:`{avoid3}`"
@@ -298,8 +295,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
     e3_win_streak, max_e3_win_streak = 0, 0
     e3_lose_streak, max_e3_lose_streak = 0, 0
 
-    prev_failures = {'start': False, 'line': False, 'oe': False}
-    last_avoid_failed = False
     history_picks = {}
 
     for i in range(3, n):
@@ -310,12 +305,10 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if history_store and rd_key in history_store:
             res = history_store[rd_key]
         else:
-            res = analyze_triple_avoid_system(past_sub, prev_failures, last_avoid_failed)
+            res = analyze_triple_avoid_system(past_sub)
 
         history_picks[i] = res
         if act not in ALL_COMBOS: continue
-
-        act_s, act_l, act_o = ITEM_MAP[act]
 
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
@@ -328,7 +321,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e1_lose_streak += 1; e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 (1순위 추천픽): 실제로 나와야 적중
+            # 엔진 2 (1순위 추천픽): 나와야 적중
             if res['avoid2'] == act:
                 avoid2_win += 1; e2_win_streak += 1; e2_lose_streak = 0
                 if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
@@ -344,12 +337,6 @@ def calculate_stats(records_tuple, history_store, target_date=None):
                 e3_lose_streak += 1; e3_win_streak = 0
                 if e3_lose_streak > max_e3_lose_streak: max_e3_lose_streak = e3_lose_streak
 
-        rec_s, rec_l, rec_o = ITEM_MAP[res['rec1']]
-        prev_failures['start'] = (rec_s != act_s)
-        prev_failures['line'] = (rec_l != act_l)
-        prev_failures['oe'] = (rec_o != act_o)
-        last_avoid_failed = (res['avoid1'] == act)
-
     stats = {
         'tot': tot,
         'avoid1_win': avoid1_win, 'avoid1_lose': tot - avoid1_win, 'avoid1_rate': (avoid1_win/tot*100.0) if tot > 0 else 0.0,
@@ -357,9 +344,7 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         'avoid3_win': avoid3_win, 'avoid3_lose': tot - avoid3_win, 'avoid3_rate': (avoid3_win/tot*100.0) if tot > 0 else 0.0,
         'max_e1_win_streak': max_e1_win_streak, 'max_e1_lose_streak': max_e1_lose_streak,
         'max_e2_win_streak': max_e2_win_streak, 'max_e2_lose_streak': max_e2_lose_streak,
-        'max_e3_win_streak': max_e3_win_streak, 'max_e3_lose_streak': max_e3_lose_streak,
-        'prev_failures': prev_failures,
-        'last_avoid_failed': last_avoid_failed
+        'max_e3_win_streak': max_e3_win_streak, 'max_e3_lose_streak': max_e3_lose_streak
     }
     return stats, history_picks
 
@@ -484,9 +469,7 @@ else:
 
     st.markdown("---")
 
-    p_fails = recent_stat['prev_failures'] if recent_stat else {'start': False, 'line': False, 'oe': False}
-    l_avoid_fail = recent_stat['last_avoid_failed'] if recent_stat else False
-    curr_res = analyze_triple_avoid_system(records_tuple, p_fails, l_avoid_fail)
+    curr_res = analyze_triple_avoid_system(records_tuple)
 
     if curr_res:
         next_rd_key = f"{curr_date}_{next_round}"
