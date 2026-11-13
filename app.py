@@ -156,7 +156,7 @@ def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
-# 🎯 방어 모드 제거: 순수 3축 패턴 규칙만 적용
+# 🎯 순수 3축 패턴 규칙 + 동점 방지를 위한 최근 10회차 편향도 미세 반영
 def analyze_pure_rule_axis(stream, val1, val2):
     n = len(stream)
     if n < 3: return val1, 70
@@ -170,14 +170,16 @@ def analyze_pure_rule_axis(stream, val1, val2):
     else:
         pick, weight = last, 78
 
-    return pick, weight
+    recent_window = stream[-10:]
+    freq_bonus = (recent_window.count(pick) / len(recent_window)) * 3.0
+    return pick, round(weight + freq_bonus, 2)
 
 def score_pure_rule_axis(stream, val1, val2):
     pick, weight = analyze_pure_rule_axis(stream, val1, val2)
     other_val = OPPOSITE_SINGLE_MAP[pick]
-    return {pick: weight, other_val: 100 - weight}
+    return {pick: weight, other_val: round(100 - weight, 2)}
 
-# 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽)
+# 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽) + 출발/줄/홀짝 중 최저점 단일축 선별
 def get_engine1_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '좌사', '좌'
@@ -207,7 +209,7 @@ def get_engine1_picks(records_tuple):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽)
+# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽) + 출발/줄/홀짝 중 최고점 단일축 선별
 def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '우'
@@ -236,10 +238,10 @@ def get_engine2_picks(records_tuple):
 
     return top_combo, single_hole
 
-# 🎯 [엔진 3] 최근 최장 미출현 조합 지울픽
-def get_engine3_avoid_pattern(records_tuple):
+# 🎯 [엔진 3] 최근 최장 미출현 조합 지울픽 + 엔진1/엔진2 단일축과 겹치지 않는 축에서 단일성분 선별
+def get_engine3_avoid_pattern(records_tuple, hole1='좌', hole2='우'):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if not valid: return '좌사', '좌'
+    if not valid: return '좌사', '사'
 
     last_seen = {c: float('inf') for c in ALL_COMBOS}
     for i, c in enumerate(reversed(valid)):
@@ -247,7 +249,38 @@ def get_engine3_avoid_pattern(records_tuple):
             last_seen[c] = i
 
     avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
-    single_hole = ITEM_MAP[avoid_combo][0]
+
+    # 축 판별 도우미 (0: 출발, 1: 줄, 2: 홀짝)
+    def get_axis_idx(val):
+        if val in ('우', '좌'): return 0
+        if val in ('삼', '사'): return 1
+        if val in ('홀', '짝'): return 2
+        return -1
+
+    used_axes = {get_axis_idx(hole1), get_axis_idx(hole2)}
+    target_elements = ITEM_MAP[avoid_combo]  # (출발, 줄, 홀짝)
+
+    # 엔진1, 엔진2와 겹치지 않는 축의 인덱스만 후보로 필터링
+    candidate_indices = [idx for idx in range(3) if idx not in used_axes]
+    if not candidate_indices:
+        candidate_indices = [0, 1, 2]
+
+    # 후보 축들 중 가장 오랫동안 안 나온 성분 우선 선택
+    elem_last_seen = {idx: float('inf') for idx in candidate_indices}
+    for i, c in enumerate(reversed(valid)):
+        c_elems = ITEM_MAP[c]
+        for idx in candidate_indices:
+            if elem_last_seen[idx] == float('inf') and c_elems[idx] == target_elements[idx]:
+                elem_last_seen[idx] = i
+
+    recent_20 = valid[-20:]
+    def elem_priority(idx):
+        el = target_elements[idx]
+        cnt = sum(1 for r in recent_20 if ITEM_MAP[r][idx] == el)
+        return (elem_last_seen[idx], -cnt)
+
+    best_idx = max(candidate_indices, key=elem_priority)
+    single_hole = target_elements[best_idx]
 
     return avoid_combo, single_hole
 
@@ -258,13 +291,13 @@ def analyze_triple_avoid_system(records_tuple):
         return {
             'rec1': '우삼', 'avoid1': '좌사', 'hole1': '좌',
             'avoid2': '우삼', 'hole2': '우',
-            'avoid3': '좌사', 'hole3': '좌',
+            'avoid3': '좌사', 'hole3': '사',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
     rec1, avoid1, hole1 = get_engine1_picks(records_tuple)
     avoid2, hole2 = get_engine2_picks(records_tuple)
-    avoid3, hole3 = get_engine3_avoid_pattern(records_tuple)
+    avoid3, hole3 = get_engine3_avoid_pattern(records_tuple, hole1, hole2)
 
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
