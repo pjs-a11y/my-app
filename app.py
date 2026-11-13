@@ -156,7 +156,7 @@ def push_backup():
     st.session_state.history_stack.append(copy.deepcopy(st.session_state.records))
     if len(st.session_state.history_stack) > 10: st.session_state.history_stack.pop(0)
 
-# 🎯 순수 3축 패턴 규칙 + 동점 방지를 위한 최근 10회차 편향도 미세 반영
+# 🎯 방어 모드 제거: 순수 3축 패턴 규칙만 적용
 def analyze_pure_rule_axis(stream, val1, val2):
     n = len(stream)
     if n < 3: return val1, 70
@@ -170,17 +170,14 @@ def analyze_pure_rule_axis(stream, val1, val2):
     else:
         pick, weight = last, 78
 
-    # 최근 10회차 내 해당 성분 출현 빈도를 소수점으로 반영해 출발/줄/홀짝 간 동점 쏠림 방지
-    recent_window = stream[-10:]
-    freq_bonus = (recent_window.count(pick) / len(recent_window)) * 3.0
-    return pick, round(weight + freq_bonus, 2)
+    return pick, weight
 
 def score_pure_rule_axis(stream, val1, val2):
     pick, weight = analyze_pure_rule_axis(stream, val1, val2)
     other_val = OPPOSITE_SINGLE_MAP[pick]
-    return {pick: weight, other_val: round(100 - weight, 2)}
+    return {pick: weight, other_val: 100 - weight}
 
-# 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽) + 출발/줄/홀짝 중 최저점 단일축 선별
+# 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽)
 def get_engine1_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '좌사', '좌'
@@ -200,7 +197,6 @@ def get_engine1_picks(records_tuple):
     rec_combo = sorted_combos[0][0]
     avoid_combo = sorted_combos[-1][0]
 
-    # 출발, 줄, 홀짝 중 점수가 가장 낮은 성분 1개 선택
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
         (avoid_s, s_scores.get(avoid_s, 50)),
@@ -211,7 +207,7 @@ def get_engine1_picks(records_tuple):
 
     return rec_combo, avoid_combo, single_hole
 
-# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽) + 출발/줄/홀짝 중 최고점 단일축 선별
+# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽)
 def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '우'
@@ -230,7 +226,6 @@ def get_engine2_picks(records_tuple):
     sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
     top_combo = sorted_combos[0][0]
 
-    # 출발, 줄, 홀짝 중 점수가 가장 높은 성분 1개 선택
     top_s, top_l, top_o = ITEM_MAP[top_combo]
     element_scores = [
         (top_s, s_scores.get(top_s, 50)),
@@ -241,7 +236,7 @@ def get_engine2_picks(records_tuple):
 
     return top_combo, single_hole
 
-# 🎯 [엔진 3] 최근 최장 미출현 조합 지울픽 + 해당 조합의 출발/줄/홀짝 중 최장 미출현 단일축 선별
+# 🎯 [엔진 3] 최근 최장 미출현 조합 지울픽
 def get_engine3_avoid_pattern(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if not valid: return '좌사', '좌'
@@ -252,25 +247,7 @@ def get_engine3_avoid_pattern(records_tuple):
             last_seen[c] = i
 
     avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
-
-    # 해당 미출 조합의 3성분(출발, 줄, 홀짝) 중 각각 가장 오랫동안 안 나온 성분 계산
-    target_elements = ITEM_MAP[avoid_combo]
-    elem_last_seen = {el: float('inf') for el in target_elements}
-
-    for i, c in enumerate(reversed(valid)):
-        c_elems = ITEM_MAP[c]
-        for idx, el in enumerate(target_elements):
-            if elem_last_seen[el] == float('inf') and c_elems[idx] == el:
-                elem_last_seen[el] = i
-
-    # 가장 미출현 기간이 긴 단일 성분 선택 (동점 시 최근 20회차 출현 횟수가 더 적은 축 우선)
-    recent_20 = valid[-20:]
-    def elem_priority(el):
-        idx = target_elements.index(el)
-        cnt = sum(1 for r in recent_20 if ITEM_MAP[r][idx] == el)
-        return (elem_last_seen[el], -cnt)
-
-    single_hole = max(target_elements, key=elem_priority)
+    single_hole = ITEM_MAP[avoid_combo][0]
 
     return avoid_combo, single_hole
 
