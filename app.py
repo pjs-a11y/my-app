@@ -179,10 +179,41 @@ def score_pure_rule_axis(stream, val1, val2):
     other_val = OPPOSITE_SINGLE_MAP[pick]
     return {pick: weight, other_val: round(100 - weight, 2)}
 
-# 🎯 [엔진 1] 3축 점수합산 최저 확률 (4순위 지울픽) + 출발/줄/홀짝 중 최저점 단일축 선별
-def get_engine1_picks(records_tuple):
+# 🎯 [엔진 2 - 1순위 선점] 3축 점수합산 최고 확률 (1순위 추천픽) + 출발/줄/홀짝 중 최고점 단일축 선별
+def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '좌사', '좌', 0
+    if len(valid) < 3: return '우삼', '우', 0
+
+    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
+    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
+    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
+
+    combo_scores = {
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
+    }
+
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    top_combo = sorted_combos[0][0]
+
+    # 0: 출발, 1: 줄, 2: 홀짝 중 가장 나올 확률(점수)이 높은 축 1개 우선 선택
+    top_s, top_l, top_o = ITEM_MAP[top_combo]
+    element_scores = [
+        (0, top_s, s_scores.get(top_s, 50)),
+        (1, top_l, l_scores.get(top_l, 50)),
+        (2, top_o, o_scores.get(top_o, 50))
+    ]
+    best_e2 = sorted(element_scores, key=lambda x: x[2], reverse=True)[0]
+    axis2_idx, single_hole = best_e2[0], best_e2[1]
+
+    return top_combo, single_hole, axis2_idx
+
+# 🎯 [엔진 1 - 2순위 배정] 3축 점수합산 최저 확률 (4순위 지울픽) + 엔진2 축을 제외한 나머지 축 중 최저점 단일축 선별
+def get_engine1_picks(records_tuple, exclude_axis_idx):
+    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
+    if len(valid) < 3: return '우삼', '좌사', '사', 1
 
     s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
@@ -199,52 +230,21 @@ def get_engine1_picks(records_tuple):
     rec_combo = sorted_combos[0][0]
     avoid_combo = sorted_combos[-1][0]
 
-    # 0: 출발, 1: 줄, 2: 홀짝 중 점수가 가장 낮은 축 1개 선택
+    # 엔진2에서 선택된 축(exclude_axis_idx)을 제외한 나머지 2개 축 중 나올 확률이 가장 낮은 축 선택
     avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
     element_scores = [
         (0, avoid_s, s_scores.get(avoid_s, 50)),
         (1, avoid_l, l_scores.get(avoid_l, 50)),
         (2, avoid_o, o_scores.get(avoid_o, 50))
     ]
-    best_e1 = sorted(element_scores, key=lambda x: x[2])[0]
+    available_elements = [el for el in element_scores if el[0] != exclude_axis_idx]
+    best_e1 = sorted(available_elements, key=lambda x: x[2])[0]
     axis1_idx, single_hole = best_e1[0], best_e1[1]
 
     return rec_combo, avoid_combo, single_hole, axis1_idx
 
-# 🎯 [엔진 2] 3축 점수합산 최고 확률 (1순위 추천픽) + 엔진1 축을 제외한 나머지 축 중 최고점 단일축 선별
-def get_engine2_picks(records_tuple, exclude_axis_idx):
-    valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우삼', '삼', 1
-
-    s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
-    l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
-    o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
-
-    combo_scores = {
-        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
-        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50),
-        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
-        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50)
-    }
-
-    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
-    top_combo = sorted_combos[0][0]
-
-    # 엔진1에서 선택된 축(exclude_axis_idx)을 제외한 나머지 2개 축 중 최고점 축 선택
-    top_s, top_l, top_o = ITEM_MAP[top_combo]
-    element_scores = [
-        (0, top_s, s_scores.get(top_s, 50)),
-        (1, top_l, l_scores.get(top_l, 50)),
-        (2, top_o, o_scores.get(top_o, 50))
-    ]
-    available_elements = [el for el in element_scores if el[0] != exclude_axis_idx]
-    best_e2 = sorted(available_elements, key=lambda x: x[2], reverse=True)[0]
-    axis2_idx, single_hole = best_e2[0], best_e2[1]
-
-    return top_combo, single_hole, axis2_idx
-
-# 🎯 [엔진 3] 최근 최장 미출현 조합 지울픽 + 엔진1, 엔진2에서 선택되지 않은 나머지 축에서 최장 미출현 단일성분 선별
-def get_engine3_avoid_pattern(records_tuple, axis1_idx, axis2_idx):
+# 🎯 [엔진 3 - 3순위 배정] 최근 최장 미출현 조합 지울픽 + 엔진2, 엔진1에서 선택되지 않은 나머지 축에서 최장 미출현 단일성분 선별
+def get_engine3_avoid_pattern(records_tuple, axis2_idx, axis1_idx):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if not valid: return '좌사', '홀'
 
@@ -255,8 +255,8 @@ def get_engine3_avoid_pattern(records_tuple, axis1_idx, axis2_idx):
 
     avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
 
-    # 엔진1, 엔진2에서 선택되지 않은 남은 축 찾기
-    used_axes = {axis1_idx, axis2_idx}
+    # 엔진2, 엔진1에서 선택되지 않은 남은 축 찾기
+    used_axes = {axis2_idx, axis1_idx}
     remaining_axes = [idx for idx in range(3) if idx not in used_axes]
     target_axis = remaining_axes[0] if remaining_axes else 2
 
@@ -278,15 +278,15 @@ def analyze_triple_avoid_system(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3:
         return {
-            'rec1': '우삼', 'avoid1': '좌사', 'hole1': '좌',
-            'avoid2': '우삼', 'hole2': '삼',
+            'rec1': '우삼', 'avoid1': '좌사', 'hole1': '사',
+            'avoid2': '우삼', 'hole2': '우',
             'avoid3': '좌사', 'hole3': '홀',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
-    rec1, avoid1, hole1, axis1_idx = get_engine1_picks(records_tuple)
-    avoid2, hole2, axis2_idx = get_engine2_picks(records_tuple, axis1_idx)
-    avoid3, hole3 = get_engine3_avoid_pattern(records_tuple, axis1_idx, axis2_idx)
+    avoid2, hole2, axis2_idx = get_engine2_picks(records_tuple)
+    rec1, avoid1, hole1, axis1_idx = get_engine1_picks(records_tuple, axis2_idx)
+    avoid3, hole3 = get_engine3_avoid_pattern(records_tuple, axis2_idx, axis1_idx)
 
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
