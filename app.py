@@ -72,6 +72,7 @@ if "manual_target_round" not in st.session_state:
 MAX_DATA_SIZE = 500
 ALL_COMBOS = ['우삼', '우사', '좌삼', '좌사']
 
+# 4가지 완성형 결과 매핑: 우사홀, 우삼짝, 좌사짝, 좌삼홀
 ITEM_FULL_MAP = {
     '우사': '우사홀',
     '우삼': '우삼짝',
@@ -179,37 +180,38 @@ def score_pure_rule_axis(stream, val1, val2):
     other_val = OPPOSITE_SINGLE_MAP[pick]
     return {pick: weight, other_val: round(100 - weight, 2)}
 
-# 🎯 [엔진 2 - 1순위 선점] 출발/줄/홀짝 중 나올 확률이 가장 높은 상위 2개 축을 자유 조합 + 최고점 단일축 선별
+# 🎯 [엔진 2 - 1순위 선점] 4가지 완성형(우사홀, 우삼짝, 좌사짝, 좌삼홀) 중 최고 확률 1순위 + 최고점 단일축 선별
 def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if len(valid) < 3: return '우짝', '우', 0
+    if len(valid) < 3: return '우삼', '우', 0
 
     s_scores = score_pure_rule_axis([ITEM_MAP[r][0] for r in valid], '우', '좌')
     l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
     o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
-    # 각 축(0:출발, 1:줄, 2:홀짝)에서 최고 점수 성분 추출
-    best_s = max(s_scores.items(), key=lambda x: x[1])
-    best_l = max(l_scores.items(), key=lambda x: x[1])
-    best_o = max(o_scores.items(), key=lambda x: x[1])
+    combo_scores = {
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50)
+    }
 
-    axis_candidates = [
-        (0, best_s[0], best_s[1]),
-        (1, best_l[0], best_l[1]),
-        (2, best_o[0], best_o[1])
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    top_combo = sorted_combos[0][0]
+
+    # 0: 출발, 1: 줄, 2: 홀짝 중 가장 나올 확률(점수)이 높은 축 1개 우선 선택
+    top_s, top_l, top_o = ITEM_MAP[top_combo]
+    element_scores = [
+        (0, top_s, s_scores.get(top_s, 50)),
+        (1, top_l, l_scores.get(top_l, 50)),
+        (2, top_o, o_scores.get(top_o, 50))
     ]
-    # 확률이 가장 높은 상위 2개 축 선택 후 축 순서(출발->줄->홀짝)대로 조합
-    top_two = sorted(axis_candidates, key=lambda x: x[2], reverse=True)[:2]
-    top_two_ordered = sorted(top_two, key=lambda x: x[0])
-    top_combo = f"{top_two_ordered[0][1]}{top_two_ordered[1][1]}"
-
-    # 단일 구멍은 3개 축 중 최고점 1개 축 선점
-    best_e2 = top_two[0]
+    best_e2 = sorted(element_scores, key=lambda x: x[2], reverse=True)[0]
     axis2_idx, single_hole = best_e2[0], best_e2[1]
 
     return top_combo, single_hole, axis2_idx
 
-# 🎯 [엔진 1 - 2순위 배정] 출발/줄/홀짝 중 나올 확률이 가장 낮은 하위 2개 축을 자유 조합 + 엔진2 제외 최저점 단일축 선별
+# 🎯 [엔진 1 - 2순위 배정] 4가지 완성형 중 최저 확률 4순위 지울픽 + 엔진2 제외 나머지 축 중 최저점 단일축 선별
 def get_engine1_picks(records_tuple, exclude_axis_idx):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '좌사', '사', 1
@@ -218,59 +220,56 @@ def get_engine1_picks(records_tuple, exclude_axis_idx):
     l_scores = score_pure_rule_axis([ITEM_MAP[r][1] for r in valid], '삼', '사')
     o_scores = score_pure_rule_axis([ITEM_MAP[r][2] for r in valid], '홀', '짝')
 
-    # 각 축(0:출발, 1:줄, 2:홀짝)에서 최저 점수 성분 추출
-    worst_s = min(s_scores.items(), key=lambda x: x[1])
-    worst_l = min(l_scores.items(), key=lambda x: x[1])
-    worst_o = min(o_scores.items(), key=lambda x: x[1])
+    combo_scores = {
+        '우삼': s_scores.get('우', 50) + l_scores.get('삼', 50) + o_scores.get('짝', 50),
+        '우사': s_scores.get('우', 50) + l_scores.get('사', 50) + o_scores.get('홀', 50),
+        '좌삼': s_scores.get('좌', 50) + l_scores.get('삼', 50) + o_scores.get('홀', 50),
+        '좌사': s_scores.get('좌', 50) + l_scores.get('사', 50) + o_scores.get('짝', 50)
+    }
 
-    axis_candidates = [
-        (0, worst_s[0], worst_s[1]),
-        (1, worst_l[0], worst_l[1]),
-        (2, worst_o[0], worst_o[1])
-    ]
-    # 확률이 가장 낮은 하위 2개 축 선택 후 축 순서(출발->줄->홀짝)대로 조합
-    bottom_two = sorted(axis_candidates, key=lambda x: x[2])[:2]
-    bottom_two_ordered = sorted(bottom_two, key=lambda x: x[0])
-    avoid_combo = f"{bottom_two_ordered[0][1]}{bottom_two_ordered[1][1]}"
+    sorted_combos = sorted(combo_scores.items(), key=lambda x: x[1], reverse=True)
+    avoid_combo = sorted_combos[-1][0]
 
     # 엔진2에서 선택된 축(exclude_axis_idx)을 제외한 나머지 2개 축 중 나올 확률이 가장 낮은 축 선택
-    available_elements = [el for el in axis_candidates if el[0] != exclude_axis_idx]
+    avoid_s, avoid_l, avoid_o = ITEM_MAP[avoid_combo]
+    element_scores = [
+        (0, avoid_s, s_scores.get(avoid_s, 50)),
+        (1, avoid_l, l_scores.get(avoid_l, 50)),
+        (2, avoid_o, o_scores.get(avoid_o, 50))
+    ]
+    available_elements = [el for el in element_scores if el[0] != exclude_axis_idx]
     best_e1 = sorted(available_elements, key=lambda x: x[2])[0]
     axis1_idx, single_hole = best_e1[0], best_e1[1]
 
     return avoid_combo, single_hole, axis1_idx
 
-# 🎯 [엔진 3 - 3순위 배정] 출발/줄/홀짝 각 축별 최장 미출현 상위 2개 축 자유 조합 + 남은 1개 축 최장 미출현 단일성분 선별
+# 🎯 [엔진 3 - 3순위 배정] 4가지 완성형 중 최장 미출현 지울픽 + 엔진2, 엔진1에서 선택되지 않은 나머지 축에서 최장 미출현 단일성분 선별
 def get_engine3_avoid_pattern(records_tuple, axis2_idx, axis1_idx):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
-    if not valid: return '좌홀', '홀'
+    if not valid: return '좌사', '짝'
 
-    # 3개 축별 각 성분의 최장 미출현 기간 계산
-    axis_groups = [
-        (0, ('우', '좌')),
-        (1, ('삼', '사')),
-        (2, ('홀', '짝'))
-    ]
-    longest_per_axis = []
-    for ax_idx, candidates in axis_groups:
-        last_seen = {el: float('inf') for el in candidates}
-        for i, c in enumerate(reversed(valid)):
-            val = ITEM_MAP[c][ax_idx]
-            if last_seen[val] == float('inf'):
-                last_seen[val] = i
-        best_el, max_gap = max(last_seen.items(), key=lambda x: x[1])
-        longest_per_axis.append((ax_idx, best_el, max_gap))
+    last_seen = {c: float('inf') for c in ALL_COMBOS}
+    for i, c in enumerate(reversed(valid)):
+        if last_seen[c] == float('inf'):
+            last_seen[c] = i
 
-    # 가장 오래 안 나온 상위 2개 축을 골라 조합
-    top_two_gaps = sorted(longest_per_axis, key=lambda x: x[2], reverse=True)[:2]
-    top_two_ordered = sorted(top_two_gaps, key=lambda x: x[0])
-    avoid_combo = f"{top_two_ordered[0][1]}{top_two_ordered[1][1]}"
+    avoid_combo = max(last_seen.items(), key=lambda x: x[1])[0]
 
-    # 엔진2, 엔진1에서 선택되지 않은 남은 1개 축의 최장 미출현 성분 선택
+    # 엔진2, 엔진1에서 선택되지 않은 남은 1개 축 찾기
     used_axes = {axis2_idx, axis1_idx}
     remaining_axes = [idx for idx in range(3) if idx not in used_axes]
     target_axis = remaining_axes[0] if remaining_axes else 2
-    single_hole = next(el for ax, el, _ in longest_per_axis if ax == target_axis)
+
+    # 해당 남은 축(target_axis)에 속한 2가지 성분 중 가장 오랫동안 안 나온 성분 찾기
+    axis_candidates = [('우', '좌'), ('삼', '사'), ('홀', '짝')][target_axis]
+    elem_last_seen = {el: float('inf') for el in axis_candidates}
+
+    for i, c in enumerate(reversed(valid)):
+        val_in_axis = ITEM_MAP[c][target_axis]
+        if elem_last_seen[val_in_axis] == float('inf'):
+            elem_last_seen[val_in_axis] = i
+
+    single_hole = max(elem_last_seen.items(), key=lambda x: x[1])[0]
 
     return avoid_combo, single_hole
 
@@ -280,8 +279,8 @@ def analyze_triple_avoid_system(records_tuple):
     if len(valid) < 3:
         return {
             'avoid1': '좌사', 'hole1': '사',
-            'avoid2': '우짝', 'hole2': '우',
-            'avoid3': '좌홀', 'hole3': '홀',
+            'avoid2': '우삼', 'hole2': '우',
+            'avoid3': '좌사', 'hole3': '짝',
             'pattern_str': '-', 'bet_guide': '⛔ 패스 추천 (데이터 부족)'
         }
 
@@ -292,9 +291,9 @@ def analyze_triple_avoid_system(records_tuple):
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
     if avoid1 == avoid3:
-        bet_guide = f"🔥 [지울픽 일치] 엔진1/3:`{avoid1}` ➔ 지우기 강력 추천 (GO)"
+        bet_guide = f"🔥 [지울픽 일치] 엔진1/3:`{ITEM_FULL_MAP[avoid1]}` ➔ 강력 3마킹 배팅 (GO)"
     else:
-        bet_guide = f"📊 [분석 진행] 엔진1(지움):`{avoid1}` / 엔진2(추천):`{avoid2}` / 엔진3(지움):`{avoid3}`"
+        bet_guide = f"📊 [분석 진행] 엔진1(지움):`{ITEM_FULL_MAP[avoid1]}` / 엔진2(추천):`{ITEM_FULL_MAP[avoid2]}` / 엔진3(지움):`{ITEM_FULL_MAP[avoid3]}`"
 
     return {
         'avoid1': avoid1, 'hole1': hole1,
@@ -303,13 +302,6 @@ def analyze_triple_avoid_system(records_tuple):
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
-
-# 2글자 조합(예: '우홀', '사짝')이 실제 결과의 3성분('우','사','홀')에 모두 포함되는지 판별
-def is_combo_matched(combo_str, actual_code):
-    if not combo_str or actual_code not in ITEM_MAP:
-        return False
-    act_elements = set(ITEM_MAP[actual_code])
-    return all(ch in act_elements for ch in combo_str)
 
 def calculate_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
@@ -342,24 +334,24 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
             
-            # 엔진 1 (지울픽): 두 성분이 동시에 나오지 않아야 성공
-            if not is_combo_matched(res['avoid1'], act):
+            # 엔진 1 (지울픽): 안 나와야 성공
+            if res['avoid1'] != act:
                 avoid1_win += 1; e1_win_streak += 1; e1_lose_streak = 0
                 if e1_win_streak > max_e1_win_streak: max_e1_win_streak = e1_win_streak
             else:
                 e1_lose_streak += 1; e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 (1순위 추천픽): 두 성분이 모두 포함되어야 적중
-            if is_combo_matched(res['avoid2'], act):
+            # 엔진 2 (1순위 추천픽): 나와야 적중
+            if res['avoid2'] == act:
                 avoid2_win += 1; e2_win_streak += 1; e2_lose_streak = 0
                 if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
             else:
                 e2_lose_streak += 1; e2_win_streak = 0
                 if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
-            # 엔진 3 (지울픽): 두 성분이 동시에 나오지 않아야 성공
-            if not is_combo_matched(res['avoid3'], act):
+            # 엔진 3 (지울픽): 안 나와야 성공
+            if res['avoid3'] != act:
                 avoid3_win += 1; e3_win_streak += 1; e3_lose_streak = 0
                 if e3_win_streak > max_e3_win_streak: max_e3_win_streak = e3_win_streak
             else:
@@ -458,9 +450,9 @@ else:
     recent_cnt = len(records)
     st.markdown(f"**누적 3중 엔진 성적 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
-        st.markdown(f"⛔ **엔진1 (하위2축 지울픽) : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 ({recent_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"🎯 **엔진2 (상위2축 추천픽) : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 ({recent_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진3 (미출2축 지울픽) : {recent_stat['avoid3_win']}승 {recent_stat['avoid3_lose']}패 ({recent_stat['avoid3_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진1 (4순위 지울픽) : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 ({recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진2 (1순위 추천픽) : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 ({recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"⛔ **엔진3 (미출 지울픽) : {recent_stat['avoid3_win']}승 {recent_stat['avoid3_lose']}패 ({recent_stat['avoid3_rate']:.1f}%)**")
 
     st.markdown("---")
 
@@ -484,14 +476,14 @@ else:
             st.markdown("결과 : **패스(PASS)**")
         else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
-            avoid1_ok = "성공 🎯" if prev_res and not is_combo_matched(prev_res['avoid1'], prev_actual) else "나와버림 ❌"
-            avoid2_ok = "적중 🎯" if prev_res and is_combo_matched(prev_res['avoid2'], prev_actual) else "미적중 ❌"
-            avoid3_ok = "성공 🎯" if prev_res and not is_combo_matched(prev_res['avoid3'], prev_actual) else "나와버림 ❌"
+            avoid1_ok = "성공 🎯" if prev_res and prev_res['avoid1'] != prev_actual else "나와버림 ❌"
+            avoid2_ok = "적중 🎯" if prev_res and prev_res['avoid2'] == prev_actual else "미적중 ❌"
+            avoid3_ok = "성공 🎯" if prev_res and prev_res['avoid3'] != prev_actual else "나와버림 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
-                e1_full = f"{prev_res['avoid1']}[{prev_res.get('hole1','-')}]"
-                e2_full = f"{prev_res['avoid2']}[{prev_res.get('hole2','-')}]"
-                e3_full = f"{prev_res['avoid3']}[{prev_res.get('hole3','-')}]"
+                e1_full = f"{ITEM_FULL_MAP.get(prev_res['avoid1'], prev_res['avoid1'])}[{prev_res.get('hole1','-')}]"
+                e2_full = f"{ITEM_FULL_MAP.get(prev_res['avoid2'], prev_res['avoid2'])}[{prev_res.get('hole2','-')}]"
+                e3_full = f"{ITEM_FULL_MAP.get(prev_res['avoid3'], prev_res['avoid3'])}[{prev_res.get('hole3','-')}]"
                 st.markdown(f"⛔ **엔진1 (지울픽) : {e1_full}** ➔ {avoid1_ok}")
                 st.markdown(f"🎯 **엔진2 (추천픽) : {e2_full}** ➔ {avoid2_ok}")
                 st.markdown(f"⛔ **엔진3 (지울픽) : {e3_full}** ➔ {avoid3_ok}")
@@ -508,13 +500,13 @@ else:
     st.markdown(f"📢 **[배팅 가이드]: {curr_res['bet_guide']}**")
     st.markdown(f"📊 **최근 진행 흐름**: `{curr_res['pattern_str']}`")
     
-    e1_disp = f"{curr_res['avoid1']}[{curr_res['hole1']}]"
-    e2_disp = f"{curr_res['avoid2']}[{curr_res['hole2']}]"
-    e3_disp = f"{curr_res['avoid3']}[{curr_res['hole3']}]"
+    e1_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid1'], curr_res['avoid1'])}[{curr_res['hole1']}]"
+    e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
+    e3_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid3'], curr_res['avoid3'])}[{curr_res['hole3']}]"
     
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[최저 2축 조합]`")
-    st.markdown(f"🎯 **[엔진 2 추천픽]: `{e2_disp}`** `[최고 2축 조합]`")
-    st.markdown(f"⛔ **[엔진 3 지울픽]: `{e3_disp}`** `[최장 미출 2축 조합]`")
+    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[최저 4순위]`")
+    st.markdown(f"🎯 **[엔진 2 추천픽]: `{e2_disp}`** `[최고 1순위]`")
+    st.markdown(f"⛔ **[엔진 3 지울픽]: `{e3_disp}`** `[최장 미출현 추적]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -600,15 +592,15 @@ else:
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
 
-            avoid1_match = "성공 🎯" if res_prev and not is_combo_matched(res_prev['avoid1'], act_item) else "나와버림 ❌"
-            avoid2_match = "적중 🎯" if res_prev and is_combo_matched(res_prev['avoid2'], act_item) else "미적중 ❌"
-            avoid3_match = "성공 🎯" if res_prev and not is_combo_matched(res_prev['avoid3'], act_item) else "나와버림 ❌"
+            avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
+            avoid2_match = "적중 🎯" if res_prev and res_prev['avoid2'] == act_item else "미적중 ❌"
+            avoid3_match = "성공 🎯" if res_prev and res_prev['avoid3'] != act_item else "나와버림 ❌"
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "엔진1 (지울픽)": f"{res_prev['avoid1'] if res_prev else '-'} / {avoid1_match}",
-                "엔진2 (추천픽)": f"{res_prev['avoid2'] if res_prev else '-'} / {avoid2_match}",
-                "엔진3 (지울픽)": f"{res_prev['avoid3'] if res_prev else '-'} / {avoid3_match}"
+                "엔진1 (지울픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid1'], '-') if res_prev else '-'} / {avoid1_match}",
+                "엔진2 (추천픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid2'], '-') if res_prev else '-'} / {avoid2_match}",
+                "엔진3 (지울픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid3'], '-') if res_prev else '-'} / {avoid3_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
