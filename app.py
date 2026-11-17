@@ -87,6 +87,14 @@ ITEM_MAP = {
     '좌삼': ('좌', '삼', '홀')
 }
 
+# 정반대 조합 매핑 (추천 조합의 완전 반대 조합이 나왔을 때만 실패, 나머지 3개는 성공)
+OPPOSITE_COMBO_MAP = {
+    '우삼': '좌사',  # 우삼짝 추천 -> 좌사짝 나오면 실패, 나머지 성공
+    '좌사': '우삼',  # 좌사짝 추천 -> 우삼짝 나오면 실패, 나머지 성공
+    '우사': '좌삼',  # 우사홀 추천 -> 좌삼홀 나오면 실패, 나머지 성공
+    '좌삼': '우사'   # 좌삼홀 추천 -> 우사홀 나오면 실패, 나머지 성공
+}
+
 OPPOSITE_SINGLE_MAP = {
     '우': '좌', '좌': '우',
     '삼': '사', '사': '삼',
@@ -180,7 +188,7 @@ def score_pure_rule_axis(stream, val1, val2):
     other_val = OPPOSITE_SINGLE_MAP[pick]
     return {pick: weight, other_val: round(100 - weight, 2)}
 
-# 🎯 [엔진 2 - 1순위 선점] 4가지 완성형(우사홀, 우삼짝, 좌사짝, 좌삼홀) 중 최고 확률 1순위 + 최고점 단일축 선별
+# 🎯 [엔진 2 - 1순위 선점] 4가지 완성형 중 최고 확률 1순위 + 최고점 단일축 선별
 def get_engine2_picks(records_tuple):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '우삼', '우', 0
@@ -211,7 +219,7 @@ def get_engine2_picks(records_tuple):
 
     return top_combo, single_hole, axis2_idx
 
-# 🎯 [엔진 1 - 2순위 배정] 4가지 완성형 중 최저 확률 4순위 지울픽 + 엔진2 제외 나머지 축 중 최저점 단일축 선별
+# 🎯 [엔진 1 - 2순위 배정] 4가지 완성형 중 최저 확률 4순위 + 엔진2 제외 나머지 축 중 최저점 단일축 선별
 def get_engine1_picks(records_tuple, exclude_axis_idx):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if len(valid) < 3: return '좌사', '사', 1
@@ -243,7 +251,7 @@ def get_engine1_picks(records_tuple, exclude_axis_idx):
 
     return avoid_combo, single_hole, axis1_idx
 
-# 🎯 [엔진 3 - 3순위 배정] 4가지 완성형 중 최장 미출현 지울픽 + 엔진2, 엔진1에서 선택되지 않은 나머지 축에서 최장 미출현 단일성분 선별
+# 🎯 [엔진 3 - 3순위 배정] 4가지 완성형 중 최장 미출현 + 엔진2, 엔진1에서 선택되지 않은 나머지 축에서 최장 미출현 단일성분 선별
 def get_engine3_avoid_pattern(records_tuple, axis2_idx, axis1_idx):
     valid = [r[2] for r in records_tuple if r[2] in ALL_COMBOS]
     if not valid: return '좌사', '짝'
@@ -291,9 +299,9 @@ def analyze_triple_avoid_system(records_tuple):
     pattern_display = " ➔ ".join(valid[-4:]) if valid else "-"
 
     if avoid1 == avoid3:
-        bet_guide = f"🔥 [지울픽 일치] 엔진1/3:`{ITEM_FULL_MAP[avoid1]}` ➔ 강력 3마킹 배팅 (GO)"
+        bet_guide = f"🔥 [추천 일치] 엔진1/3:`{ITEM_FULL_MAP[avoid1]}` (정반대 `{ITEM_FULL_MAP[OPPOSITE_COMBO_MAP[avoid1]]}` 제외 3마킹 GO)"
     else:
-        bet_guide = f"📊 [분석 진행] 엔진1(지움):`{ITEM_FULL_MAP[avoid1]}` / 엔진2(추천):`{ITEM_FULL_MAP[avoid2]}` / 엔진3(지움):`{ITEM_FULL_MAP[avoid3]}`"
+        bet_guide = f"📊 [분석 진행] 엔진1:`{ITEM_FULL_MAP[avoid1]}` / 엔진2:`{ITEM_FULL_MAP[avoid2]}` / 엔진3:`{ITEM_FULL_MAP[avoid3]}`"
 
     return {
         'avoid1': avoid1, 'hole1': hole1,
@@ -302,6 +310,12 @@ def analyze_triple_avoid_system(records_tuple):
         'pattern_str': pattern_display,
         'bet_guide': bet_guide
     }
+
+# 추천 조합의 '정반대 조합'이 실제 결과로 나왔을 때만 실패(False), 나머지 3개 조합이 나오면 성공(True)
+def is_3marking_success(rec_combo, actual_code):
+    if rec_combo not in OPPOSITE_COMBO_MAP or actual_code not in ALL_COMBOS:
+        return False
+    return actual_code != OPPOSITE_COMBO_MAP[rec_combo]
 
 def calculate_stats(records_tuple, history_store, target_date=None):
     n = len(records_tuple)
@@ -334,24 +348,24 @@ def calculate_stats(records_tuple, history_store, target_date=None):
         if not target_date or records_tuple[i][0] == target_date:
             tot += 1
             
-            # 엔진 1 (지울픽): 안 나와야 성공
-            if res['avoid1'] != act:
+            # 엔진 1: 추천 조합의 정반대 조합이 나오면 실패, 나머지 3개 성공
+            if is_3marking_success(res['avoid1'], act):
                 avoid1_win += 1; e1_win_streak += 1; e1_lose_streak = 0
                 if e1_win_streak > max_e1_win_streak: max_e1_win_streak = e1_win_streak
             else:
                 e1_lose_streak += 1; e1_win_streak = 0
                 if e1_lose_streak > max_e1_lose_streak: max_e1_lose_streak = e1_lose_streak
 
-            # 엔진 2 (1순위 추천픽): 나와야 적중
-            if res['avoid2'] == act:
+            # 엔진 2: 추천 조합의 정반대 조합이 나오면 실패, 나머지 3개 성공
+            if is_3marking_success(res['avoid2'], act):
                 avoid2_win += 1; e2_win_streak += 1; e2_lose_streak = 0
                 if e2_win_streak > max_e2_win_streak: max_e2_win_streak = e2_win_streak
             else:
                 e2_lose_streak += 1; e2_win_streak = 0
                 if e2_lose_streak > max_e2_lose_streak: max_e2_lose_streak = e2_lose_streak
 
-            # 엔진 3 (지울픽): 안 나와야 성공
-            if res['avoid3'] != act:
+            # 엔진 3: 추천 조합의 정반대 조합이 나오면 실패, 나머지 3개 성공
+            if is_3marking_success(res['avoid3'], act):
                 avoid3_win += 1; e3_win_streak += 1; e3_lose_streak = 0
                 if e3_win_streak > max_e3_win_streak: max_e3_win_streak = e3_win_streak
             else:
@@ -450,9 +464,9 @@ else:
     recent_cnt = len(records)
     st.markdown(f"**누적 3중 엔진 성적 (최근 {recent_cnt}개 기준)**")
     if recent_stat:
-        st.markdown(f"⛔ **엔진1 (4순위 지울픽) : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 ({recent_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"🎯 **엔진2 (1순위 추천픽) : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 ({recent_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진3 (미출 지울픽) : {recent_stat['avoid3_win']}승 {recent_stat['avoid3_lose']}패 ({recent_stat['avoid3_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진1 (4순위 추천) : {recent_stat['avoid1_win']}승 {recent_stat['avoid1_lose']}패 ({recent_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진2 (1순위 추천) : {recent_stat['avoid2_win']}승 {recent_stat['avoid2_lose']}패 ({recent_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진3 (미출 추천) : {recent_stat['avoid3_win']}승 {recent_stat['avoid3_lose']}패 ({recent_stat['avoid3_rate']:.1f}%)**")
 
     st.markdown("---")
 
@@ -461,9 +475,9 @@ else:
     today_stat, _ = calculate_stats(records_tuple, st.session_state.get("history_store", {}), target_date=curr_date)
     st.markdown(f"**오늘 누적 3중 엔진 성적 ({curr_date} {w_str})**")
     if today_stat:
-        st.markdown(f"⛔ **엔진1 (지울픽 성공) : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 ({today_stat['avoid1_rate']:.1f}%)**")
-        st.markdown(f"🎯 **엔진2 (추천픽 적중) : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 ({today_stat['avoid2_rate']:.1f}%)**")
-        st.markdown(f"⛔ **엔진3 (지울픽 성공) : {today_stat['avoid3_win']}승 {today_stat['avoid3_lose']}패 ({today_stat['avoid3_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진1 성공률 : {today_stat['avoid1_win']}승 {today_stat['avoid1_lose']}패 ({today_stat['avoid1_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진2 성공률 : {today_stat['avoid2_win']}승 {today_stat['avoid2_lose']}패 ({today_stat['avoid2_rate']:.1f}%)**")
+        st.markdown(f"🎯 **엔진3 성공률 : {today_stat['avoid3_win']}승 {today_stat['avoid3_lose']}패 ({today_stat['avoid3_rate']:.1f}%)**")
 
     st.markdown("---")
 
@@ -476,17 +490,17 @@ else:
             st.markdown("결과 : **패스(PASS)**")
         else:
             act_full = ITEM_FULL_MAP.get(prev_actual, prev_actual)
-            avoid1_ok = "성공 🎯" if prev_res and prev_res['avoid1'] != prev_actual else "나와버림 ❌"
-            avoid2_ok = "적중 🎯" if prev_res and prev_res['avoid2'] == prev_actual else "미적중 ❌"
-            avoid3_ok = "성공 🎯" if prev_res and prev_res['avoid3'] != prev_actual else "나와버림 ❌"
+            avoid1_ok = "성공 🎯" if prev_res and is_3marking_success(prev_res['avoid1'], prev_actual) else "실패 ❌"
+            avoid2_ok = "성공 🎯" if prev_res and is_3marking_success(prev_res['avoid2'], prev_actual) else "실패 ❌"
+            avoid3_ok = "성공 🎯" if prev_res and is_3marking_success(prev_res['avoid3'], prev_actual) else "실패 ❌"
             st.markdown(f"실제 결과 : **{prev_actual} ({act_full})**")
             if prev_res:
                 e1_full = f"{ITEM_FULL_MAP.get(prev_res['avoid1'], prev_res['avoid1'])}[{prev_res.get('hole1','-')}]"
                 e2_full = f"{ITEM_FULL_MAP.get(prev_res['avoid2'], prev_res['avoid2'])}[{prev_res.get('hole2','-')}]"
                 e3_full = f"{ITEM_FULL_MAP.get(prev_res['avoid3'], prev_res['avoid3'])}[{prev_res.get('hole3','-')}]"
-                st.markdown(f"⛔ **엔진1 (지울픽) : {e1_full}** ➔ {avoid1_ok}")
-                st.markdown(f"🎯 **엔진2 (추천픽) : {e2_full}** ➔ {avoid2_ok}")
-                st.markdown(f"⛔ **엔진3 (지울픽) : {e3_full}** ➔ {avoid3_ok}")
+                st.markdown(f"🎯 **엔진1 추천 : {e1_full}** ➔ {avoid1_ok}")
+                st.markdown(f"🎯 **엔진2 추천 : {e2_full}** ➔ {avoid2_ok}")
+                st.markdown(f"🎯 **엔진3 추천 : {e3_full}** ➔ {avoid3_ok}")
 
     st.markdown("---")
 
@@ -504,9 +518,9 @@ else:
     e2_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid2'], curr_res['avoid2'])}[{curr_res['hole2']}]"
     e3_disp = f"{ITEM_FULL_MAP.get(curr_res['avoid3'], curr_res['avoid3'])}[{curr_res['hole3']}]"
     
-    st.markdown(f"⛔ **[엔진 1 지울픽]: `{e1_disp}`** `[최저 4순위]`")
-    st.markdown(f"🎯 **[엔진 2 추천픽]: `{e2_disp}`** `[최고 1순위]`")
-    st.markdown(f"⛔ **[엔진 3 지울픽]: `{e3_disp}`** `[최장 미출현 추적]`")
+    st.markdown(f"🎯 **[엔진 1 추천]: `{e1_disp}`** `[최저 4순위 / 반대 {ITEM_FULL_MAP[OPPOSITE_COMBO_MAP[curr_res['avoid1']]]} 제외]`")
+    st.markdown(f"🎯 **[엔진 2 추천]: `{e2_disp}`** `[최고 1순위 / 반대 {ITEM_FULL_MAP[OPPOSITE_COMBO_MAP[curr_res['avoid2']]]} 제외]`")
+    st.markdown(f"🎯 **[엔진 3 추천]: `{e3_disp}`** `[최장 미출 / 반대 {ITEM_FULL_MAP[OPPOSITE_COMBO_MAP[curr_res['avoid3']]]} 제외]`")
 
     st.markdown("---")
     st.markdown("**결과 입력**")
@@ -592,15 +606,15 @@ else:
             if act_item == "PASS": continue
             act_full = ITEM_FULL_MAP.get(act_item, act_item)
 
-            avoid1_match = "성공 🎯" if res_prev and res_prev['avoid1'] != act_item else "나와버림 ❌"
-            avoid2_match = "적중 🎯" if res_prev and res_prev['avoid2'] == act_item else "미적중 ❌"
-            avoid3_match = "성공 🎯" if res_prev and res_prev['avoid3'] != act_item else "나와버림 ❌"
+            avoid1_match = "성공 🎯" if res_prev and is_3marking_success(res_prev['avoid1'], act_item) else "실패 ❌"
+            avoid2_match = "성공 🎯" if res_prev and is_3marking_success(res_prev['avoid2'], act_item) else "실패 ❌"
+            avoid3_match = "성공 🎯" if res_prev and is_3marking_success(res_prev['avoid3'], act_item) else "실패 ❌"
 
             rows.append({
                 "회차": f"{rd_num}회", "실제 결과": f"{act_item} ({act_full})",
-                "엔진1 (지울픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid1'], '-') if res_prev else '-'} / {avoid1_match}",
-                "엔진2 (추천픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid2'], '-') if res_prev else '-'} / {avoid2_match}",
-                "엔진3 (지울픽)": f"{ITEM_FULL_MAP.get(res_prev['avoid3'], '-') if res_prev else '-'} / {avoid3_match}"
+                "엔진1": f"{ITEM_FULL_MAP.get(res_prev['avoid1'], '-') if res_prev else '-'} / {avoid1_match}",
+                "엔진2": f"{ITEM_FULL_MAP.get(res_prev['avoid2'], '-') if res_prev else '-'} / {avoid2_match}",
+                "엔진3": f"{ITEM_FULL_MAP.get(res_prev['avoid3'], '-') if res_prev else '-'} / {avoid3_match}"
             })
         if rows: st.dataframe(pd.DataFrame(rows), hide_index=True, use_container_width=True)
         else: st.markdown("오늘 유효한 회차가 없습니다.")
